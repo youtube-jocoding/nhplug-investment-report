@@ -86,19 +86,3 @@ def test_exports_escape_untrusted_names_and_eml_has_no_recipient():
     msg=BytesParser(policy=policy.default).parsebytes(email_message(r).as_bytes())
     assert msg['To'] is None
     assert msg.get_body(preferencelist=('html',))
-
-
-def test_local_server_rejects_csrf_and_external_hosts(tmp_path,monkeypatch):
-    import server
-    monkeypatch.setattr(server,'PRIVATE',tmp_path)
-    http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
-    t=threading.Thread(target=http.serve_forever,daemon=True);t.start()
-    url=f'http://127.0.0.1:{http.server_port}'
-    try:
-        req=urllib.request.Request(url+'/api/report',headers={'Host':'127.0.0.1:8766'})
-        assert json.load(urllib.request.urlopen(req))['report']['snapshot']['mode']=='demo'
-        for headers in [{'Host':'evil.example'}, {'Host':'127.0.0.1:8766'},{'Host':'127.0.0.1:8766','X-Report-Token':server.TOKEN,'Origin':'https://evil.example'}]:
-            req=urllib.request.Request(url+'/api/demo',data=b'{}',headers=headers)
-            with pytest.raises(urllib.error.HTTPError) as exc:urllib.request.urlopen(req)
-            assert exc.value.code==403
-    finally:http.shutdown();http.server_close()

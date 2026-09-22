@@ -1,143 +1,212 @@
 #!/usr/bin/env python3
+"""Loopback UI with launch-link authentication and a private session cookie."""
+import argparse
 import json
 import mimetypes
 import os
 import secrets
 import threading
+import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 from reporting.engine import analyze, demo_snapshot
-from reporting.provider import PlugReader
-from reporting.credentials import credential_environment, save_credentials
-from reporting.export import html_report, markdown, email_message, save_report, newsletter
+from reporting.provider import PlugReader, select_saved
+from reporting.credentials import credential_environment, save_credentials, credential_status
+from reporting.export import html_report, markdown, email_message, newsletter
+from reporting.storage import read_json, write_json
+from reporting.paths import ROOT, PRIVATE
 
-ROOT=Path(__file__).resolve().parent
-from reporting.paths import PRIVATE
-TOKEN=secrets.token_urlsafe(32)
-LOCK=threading.RLock()
-reader=PlugReader()
-state={'snapshot':demo_snapshot()}
-
-
-def save_private(name,data):
-    PRIVATE.mkdir(mode=0o700,exist_ok=True)
-    path=PRIVATE/name
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-    with os.fdopen(fd,'w') as f: json.dump(data,f,ensure_ascii=False)
+TOKEN = secrets.token_urlsafe(32)
+BOOTSTRAP = secrets.token_urlsafe(32)
+BOOTSTRAP_EXPIRES = time.monotonic() + 600
+LOCK = threading.RLock()
+reader = PlugReader()
+state = {'snapshot': None, 'cached': False}
 
 
 def selected_snapshot():
-    path=PRIVATE/'selected-account.json'
-    if not path.exists():raise ValueError('계좌를 먼저 연결하세요.')
-    saved=json.loads(path.read_text())
-    matches=[a for a in reader.list_accounts() if a['label']==saved['label']]
-    if len(matches)!=1:raise ValueError('저장한 계좌 식별이 모호합니다. 계좌를 다시 선택하세요.')
-    return reader.balance(matches[0]['ref'],saved.get('market','kr'))
+    path = PRIVATE / 'selected-account.json'
+    if not path.exists(): raise ValueError('계좌를 먼저 연결하세요.')
+    saved = read_json(path)
+    return reader.balance(select_saved(reader.list_accounts(), saved), saved.get('market', 'us'))
+
+
+def current_report(final=False):
+    if not state['snapshot']: raise ValueError('먼저 PLUG 계좌를 연결하세요.')
+    r = analyze(state['snapshot'])
+    if final and not r['research_status']['final_ready']:
+        raise ValueError('종목 조사를 마무리한 뒤 뉴스레터와 최종 리포트를 만들 수 있습니다.')
+    return r
+
+
+def connect_credentials(data):
+    global reader
+    credential_environment(data)
+    candidate = PlugReader(candidate=data)
+    try:
+        accounts = candidate.list_accounts()  # Fresh token, ignoring every old SDK cache.
+        save_credentials(data, token=candidate.candidate_token)
+        replacement = PlugReader()
+        replacement.accounts = dict(candidate.accounts)
+        replacement.brand = candidate.brand
+        reader.forget()
+        reader = replacement
+        # Remove only this app's deprecated file, never an ancestor/global .env.
+        legacy = PRIVATE / 'plug-credentials.json'
+        if legacy.exists(): legacy.unlink()
+        state.update(snapshot=None, cached=False)
+        for name in ('selected-account.json', 'last-snapshot.json'):
+            (PRIVATE / name).unlink(missing_ok=True)
+        return {'accounts': accounts, 'saved': True, 'connection': credential_status()}
+    except ValueError as ex:
+        raise ValueError('검증 실패 · 새 키를 저장하지 않았습니다. ' + str(ex)) from None
+    finally:
+        candidate.forget()
+        data.clear()
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self,*args): pass
-    def respond(self,data,status=200,ctype='application/json; charset=utf-8',filename=None):
-        if isinstance(data,(dict,list)): data=json.dumps(data,ensure_ascii=False)
-        if isinstance(data,str): data=data.encode()
+    def log_message(self, *args): pass
+
+    def respond(self, data, status=200, ctype='application/json; charset=utf-8', filename=None, cookie=False):
+        if isinstance(data, (dict, list)): data = json.dumps(data, ensure_ascii=False)
+        if isinstance(data, str): data = data.encode('utf-8')
         self.send_response(status)
-        self.send_header('Content-Type',ctype)
-        self.send_header('Content-Length',str(len(data)))
-        self.send_header('Cache-Control','no-store')
-        self.send_header('X-Content-Type-Options','nosniff')
-        self.send_header('X-Frame-Options','SAMEORIGIN')
-        self.send_header('Referrer-Policy','no-referrer')
-        if filename: self.send_header('Content-Disposition',f'attachment; filename="{filename}"')
-        self.end_headers(); self.wfile.write(data)
+        for key, val in {'Content-Type': ctype, 'Content-Length': str(len(data)), 'Cache-Control': 'no-store',
+                         'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN',
+                         'Referrer-Policy': 'no-referrer',
+                         'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'"}.items():
+            self.send_header(key, val)
+        if cookie: self.send_header('Set-Cookie', f'plug_session={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200')
+        if filename: self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.end_headers()
+        try: self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError): pass
+
     def allowed(self):
-        host=self.headers.get('Host','')
-        return host in {'127.0.0.1:8766','localhost:8766','127.0.0.1:5176','localhost:5176'}
+        return self.headers.get('Host', '') in {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+
+    def authenticated(self):
+        try:
+            c = SimpleCookie(self.headers.get('Cookie', ''))
+            return bool(c.get('plug_session')) and secrets.compare_digest(c['plug_session'].value, TOKEN)
+        except Exception: return False
+
     def do_GET(self):
-        if not self.allowed(): return self.respond({'error':'로컬 접속만 허용합니다.'},403)
-        path=urlparse(self.path).path
+        if not self.allowed(): return self.respond({'error': '로컬 접속만 허용합니다.'}, 403)
+        path = urlparse(self.path).path
+        if path.startswith('/api/') and not self.authenticated():
+            return self.respond({'error': '서버 시작 시 표시한 접속 링크로 화면을 여세요.'}, 401)
         with LOCK:
             try:
-                if path=='/api/delivery':
-                    f=PRIVATE/'delivery.json'
-                    return self.respond(json.loads(f.read_text()) if f.exists() else {'status':'미발송','gmail_url':None})
-                if path=='/api/report': return self.respond({'report':analyze(state['snapshot']),'token':TOKEN})
-                if path=='/api/mail-preview': return self.respond(newsletter(analyze(state['snapshot']),detail_url='/api/export/html'),ctype='text/html; charset=utf-8')
-                if path=='/api/export/eml': return self.respond(email_message(analyze(state['snapshot'])).as_bytes(),ctype='message/rfc822',filename='investment-note.eml')
-                if path=='/api/export/md': return self.respond(markdown(analyze(state['snapshot'])),ctype='text/markdown; charset=utf-8',filename='investment-note.md')
-                if path=='/api/export/html': return self.respond(html_report(analyze(state['snapshot'])),ctype='text/html; charset=utf-8')
-                if path in ('/docs/prompts','/docs/filming'):
-                    f=ROOT/'docs'/('PROMPTS.md' if path.endswith('prompts') else 'FILMING.md')
-                    return self.respond(f.read_text(),ctype='text/plain; charset=utf-8')
-                if path.startswith('/api/'): return self.respond({'error':'없는 기능입니다.'},404)
-                dist=(ROOT/'frontend/dist').resolve()
-                f=(dist/path.lstrip('/')).resolve()
-                if not f.is_relative_to(dist): return self.respond({'error':'없는 경로입니다.'},404)
-                if not f.is_file(): f=dist/'index.html'
-                if not f.exists(): return self.respond('화면 빌드가 필요합니다. ./start 를 실행하세요.',503,'text/plain; charset=utf-8')
-                return self.respond(f.read_bytes(),ctype=mimetypes.guess_type(str(f))[0] or 'application/octet-stream')
-            except ValueError as ex: return self.respond({'error':str(ex)},400)
-    def do_POST(self):
-        global reader
-        if not self.allowed() or not secrets.compare_digest(self.headers.get('X-Report-Token',''),TOKEN):
-            return self.respond({'error':'유효한 로컬 화면에서 다시 시도하세요.'},403)
-        origin=self.headers.get('Origin')
-        if origin and origin not in {'http://127.0.0.1:8766','http://localhost:8766','http://127.0.0.1:5176','http://localhost:5176'}:
-            return self.respond({'error':'외부 페이지 요청은 허용하지 않습니다.'},403)
-        try:
-            length=int(self.headers.get('Content-Length','0'))
-            if not 0<=length<=8192: return self.respond({'error':'입력 크기 제한'},413)
-            data=json.loads(self.rfile.read(length) or b'{}')
-            if not isinstance(data,dict): raise ValueError('객체 형식 입력이 필요합니다.')
-            with LOCK:
-                if self.path=='/api/demo':
-                    state.update(snapshot=demo_snapshot())
-                    report=analyze(state['snapshot'])
-                elif self.path=='/api/credentials':
-                    candidate_env=credential_environment(data)
-                    old_env={key:os.environ.get(key) for key in candidate_env}
-                    os.environ.update(candidate_env)
-                    candidate=PlugReader(credential_path=False)
-                    try:
-                        accounts=candidate.list_accounts()
-                        save_credentials(data,PRIVATE/'plug-credentials.json')
-                    except Exception:
-                        for key,value in old_env.items():
-                            if value is None:os.environ.pop(key,None)
-                            else:os.environ[key]=value
-                        raise
-                    reader=candidate
-                    return self.respond({'accounts':accounts,'saved':True})
-                elif self.path=='/api/accounts': return self.respond({'accounts':reader.list_accounts()})
-                elif self.path=='/api/connect':
-                    market=data.get('market','kr')
-                    snap=reader.balance(data.get('ref'),market)
-                    report=analyze(snap)
-                    state['snapshot']=snap
-                    save_private('selected-account.json',{'label':snap['account_label'],'market':market})
-                elif self.path=='/api/refresh':
-                    snap=selected_snapshot()
-                    report=analyze(snap)
-                    state['snapshot']=snap
-                else: return self.respond({'error':'없는 기능입니다.'},404)
-                save_report(report,ROOT/'output' if report['snapshot']['mode']=='demo' else PRIVATE/'latest')
-                if report['snapshot']['mode']!='demo':
-                    save_private('last-snapshot.json',state['snapshot'])
-                self.respond({'report':report})
-        except (ValueError,TypeError,KeyError) as ex:
-            # No upstream raw response or exception including credentials is exposed.
-            self.respond({'error':str(ex) if isinstance(ex,ValueError) else '입력 항목을 확인하세요.'},400)
-        except Exception:
-            self.respond({'error':'처리하지 못했습니다. 로컬 설정을 확인하고 다시 시도하세요.'},500)
+                if path == '/api/connection': return self.respond(credential_status())
+                if path == '/api/delivery':
+                    f = PRIVATE / 'delivery.json'
+                    return self.respond(read_json(f) if f.exists() else {'status': '미발송', 'gmail_url': None})
+                if path == '/api/report':
+                    return self.respond({'report': current_report() if state['snapshot'] else None, 'cached': state['cached'], 'connection': credential_status()})
+                if path == '/api/mail-preview': return self.respond(newsletter(current_report(True), detail_url='/api/export/html'), ctype='text/html; charset=utf-8')
+                if path == '/api/export/eml': return self.respond(email_message(current_report(True)).as_bytes(), ctype='message/rfc822', filename='investment-report.eml')
+                if path == '/api/export/md': return self.respond(markdown(current_report(True)), ctype='text/markdown; charset=utf-8', filename='investment-report.md')
+                if path == '/api/export/html': return self.respond(html_report(current_report(True)), ctype='text/html; charset=utf-8')
+                if path in ('/docs/prompts', '/docs/filming'):
+                    f = ROOT / 'docs' / ('PROMPTS.md' if path.endswith('prompts') else 'FILMING.md')
+                    return self.respond(f.read_text(encoding='utf-8'), ctype='text/plain; charset=utf-8')
+                if path.startswith('/api/'): return self.respond({'error': '없는 기능입니다.'}, 404)
+                dist = (ROOT / 'frontend/dist').resolve()
+                f = (dist / path.lstrip('/')).resolve()
+                if not f.is_relative_to(dist): return self.respond({'error': '없는 경로입니다.'}, 404)
+                if path == '/': f = dist / 'index.html'
+                if not f.is_file(): return self.respond('화면 파일이 없습니다. start를 다시 실행하세요.', 404, 'text/plain; charset=utf-8')
+                return self.respond(f.read_bytes(), ctype=mimetypes.guess_type(str(f))[0] or 'application/octet-stream')
+            except ValueError:
+                return self.respond({'error': '계좌·리서치 파일을 확인하세요. 분석 대기 항목은 최종 리포트로 내보낼 수 없습니다.'}, 400)
+            except Exception:
+                return self.respond({'error': '로컬 파일을 읽지 못했습니다. 설정과 접근 권한을 확인하세요.'}, 500)
 
-if __name__=='__main__':
-    # Restore a dated local snapshot, never misrepresent it as a fresh API call.
-    cached=PRIVATE/'last-snapshot.json'
+    def do_POST(self):
+        global BOOTSTRAP
+        origin = self.headers.get('Origin')
+        expected = 'http://' + self.headers.get('Host', '')
+        if not self.allowed() or (origin and origin != expected) or self.headers.get('Sec-Fetch-Site') == 'cross-site':
+            return self.respond({'error': '외부 페이지 요청은 허용하지 않습니다.'}, 403)
+        if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+            return self.respond({'error': 'JSON 요청만 허용합니다.'}, 415)
+        if self.path != '/api/session' and not self.authenticated(): return self.respond({'error': '접속 링크에서 다시 시작하세요.'}, 401)
+        data = {}
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 <= length <= 16384: return self.respond({'error': '입력 크기 제한'}, 413)
+            data = json.loads(self.rfile.read(length) or b'{}')
+            if not isinstance(data, dict): raise ValueError('객체 형식 입력이 필요합니다.')
+            with LOCK:
+                if self.path == '/api/session':
+                    nonce = data.get('nonce')
+                    if not isinstance(nonce, str) or not BOOTSTRAP or time.monotonic() > BOOTSTRAP_EXPIRES or not secrets.compare_digest(nonce, BOOTSTRAP):
+                        return self.respond({'error': '접속 링크가 만료되었거나 이미 사용됐습니다. start를 다시 실행하세요.'}, 403)
+                    BOOTSTRAP = None
+                    return self.respond({'ok': True}, cookie=True)
+                if self.path == '/api/credentials': return self.respond(connect_credentials(data))
+                if self.path == '/api/migrate':
+                    legacy = PRIVATE / 'plug-credentials.json'
+                    if not legacy.exists(): raise ValueError('이 앱의 이전 키 파일이 없습니다. 키를 직접 입력하세요.')
+                    return self.respond(connect_credentials(read_json(legacy)))
+                if self.path == '/api/accounts': return self.respond({'accounts': reader.list_accounts()})
+                if self.path == '/api/demo':
+                    snap = demo_snapshot()
+                elif self.path == '/api/connect':
+                    market = data.get('market', 'us')
+                    snap = reader.balance(data.get('ref'), market)
+                    write_json(PRIVATE / 'selected-account.json', {'account_id': snap['account_id'], 'label': snap['account_label'], 'market': market})
+                elif self.path == '/api/refresh': snap = selected_snapshot()
+                else: return self.respond({'error': '없는 기능입니다.'}, 404)
+                report = analyze(snap)
+                state.update(snapshot=snap, cached=False)
+                if snap['mode'] != 'demo': write_json(PRIVATE / 'last-snapshot.json', snap)
+                return self.respond({'report': report, 'cached': False})
+        except (ValueError, TypeError, KeyError) as ex:
+            self.respond({'error': str(ex) if type(ex) is ValueError else '입력 형식·필수 항목을 확인하세요.'}, 400)
+        except Exception:
+            self.respond({'error': '처리하지 못했습니다. OS 보안 저장소와 파일 권한을 확인하세요. 새 키는 저장 여부를 확인한 뒤 다시 연결하세요.'}, 500)
+        finally:
+            if isinstance(data, dict): data.clear()
+
+
+def restore_snapshot():
+    cached = PRIVATE / 'last-snapshot.json'
     if cached.exists():
         try:
-            snapshot=json.loads(cached.read_text())
+            snapshot = read_json(cached)
+            if snapshot.get('mode') not in ('live', 'mock'): return
             analyze(snapshot)
-            state.update(snapshot=snapshot)
-        except (ValueError,KeyError,TypeError):pass
-    print('투자 컨설팅 리포트: http://127.0.0.1:8766 (화면의 조회시각을 확인하세요)')
-    ThreadingHTTPServer(('127.0.0.1',8766),Handler).serve_forever()
+            state.update(snapshot=snapshot, cached=True)
+        except (OSError, ValueError, KeyError, TypeError): pass
+
+
+def bind_server(port=8766):
+    try: return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    except OSError:
+        return ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=8766)
+    parser.add_argument('--open', action='store_true')
+    args = parser.parse_args()
+    restore_snapshot()
+    http = bind_server(args.port)
+    url = f'http://127.0.0.1:{http.server_port}/#session={BOOTSTRAP}'
+    write_json(PRIVATE / 'server.json', {'url': url, 'port': http.server_port, 'pid': os.getpid()})
+    print('포트폴리오 리포트 접속 링크 (10분 이내, 이 PC에서만 사용): ' + url, flush=True)
+    if args.open:
+        import webbrowser
+        webbrowser.open(url)
+    try: http.serve_forever()
+    except KeyboardInterrupt: pass
+    finally: reader.forget(); http.server_close()
+
+
+if __name__ == '__main__': main()

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "as_of": "2026-09-23",
   "sources": {
     "msft": {
@@ -54,7 +54,7 @@
     }
   },
   "stocks": {
-    "MSFT": {
+    "US|UNKNOWN|MSFT|UNKNOWN": {
       "sector": "소프트웨어·클라우드",
       "role": "AI를 기업 매출로 전환",
       "title": "AI 사용량이 반복 매출과 현금으로 이어지는가",
@@ -133,7 +133,8 @@
             "comparison": "YoY"
           }
         ],
-        "analysis": "매출과 영업이익이 함께 증가했습니다. 다만 설비투자 지출이 영업현금 증가보다 빠르게 늘어 단순 잉여현금흐름은 전년 동기보다 감소했습니다. AI 사용 확대가 투자 회수로 이어지는지 확인할 차례입니다."
+        "analysis": "매출과 영업이익이 함께 증가했습니다. 다만 설비투자 지출이 영업현금 증가보다 빠르게 늘어 단순 잉여현금흐름은 전년 동기보다 감소했습니다. AI 사용 확대가 투자 회수로 이어지는지 확인할 차례입니다.",
+        "kind": "company"
       },
       "news": [
         {
@@ -145,10 +146,25 @@
         }
       ],
       "news_note": "최근 7일 회사 발표를 확인했습니다.",
-      "brief": "매출 +18%, 현금 회수는 투자비 부담과 함께 확인"
+      "brief": "매출 +18%, 현금 회수는 투자비 부담과 함께 확인",
+      "status": "verified",
+      "sector_id": "software",
+      "classification_basis": "공식 사업보고서의 주요 사업을 기준으로 한 자체 분석용 업종 분류. 테마와 별도.",
+      "classification_sources": [
+        "msft"
+      ],
+      "identity": {
+        "market": "US",
+        "exchange": "XNAS",
+        "code": "MSFT",
+        "product_type": "COMMON"
+      },
+      "identity_sources": [
+        "msft"
+      ]
     },
-    "GOOGL": {
-      "sector": "인터넷·광고",
+    "US|UNKNOWN|GOOGL|UNKNOWN": {
+      "sector": "커뮤니케이션 서비스",
       "role": "검색과 클라우드의 AI 수익화",
       "title": "검색의 성장과 AI 투자 회수는 동시에 가능한가",
       "thesis": "검색 광고와 클라우드는 서로 다른 매출원입니다. AI가 기존 검색의 수익성을 지키면서 새 매출도 만드는지가 핵심입니다.",
@@ -226,7 +242,8 @@
             "comparison": "직전 기말"
           }
         ],
-        "analysis": "영업이익 성장에도 설비투자가 영업현금을 웃돌았습니다. 순이익에는 투자자산 평가 영향이 포함되어 본업과 분리해야 합니다. 투자 확대가 일시적인지, 이후 현금흐름 회복으로 연결되는지가 핵심입니다."
+        "analysis": "영업이익 성장에도 설비투자가 영업현금을 웃돌았습니다. 순이익에는 투자자산 평가 영향이 포함되어 본업과 분리해야 합니다. 투자 확대가 일시적인지, 이후 현금흐름 회복으로 연결되는지가 핵심입니다.",
+        "kind": "company"
       },
       "news": [
         {
@@ -238,9 +255,24 @@
         }
       ],
       "news_note": "최근 7일 회사 발표를 확인했습니다.",
-      "brief": "매출 +24%, 투자 확대에 분기 잉여현금흐름 음수"
+      "brief": "매출 +24%, 투자 확대에 분기 잉여현금흐름 음수",
+      "status": "verified",
+      "sector_id": "communication",
+      "classification_basis": "공식 사업보고서의 주요 사업을 기준으로 한 자체 분석용 업종 분류. 테마와 별도.",
+      "classification_sources": [
+        "googl"
+      ],
+      "identity": {
+        "market": "US",
+        "exchange": "XNAS",
+        "code": "GOOGL",
+        "product_type": "COMMON"
+      },
+      "identity_sources": [
+        "googl"
+      ]
     },
-    "NVDA": {
+    "US|UNKNOWN|NVDA|UNKNOWN": {
       "sector": "반도체",
       "role": "AI 연산 인프라 공급",
       "title": "높은 성장률보다 다음 수주와 마진의 지속성",
@@ -319,7 +351,8 @@
             "comparison": "직전 기말"
           }
         ],
-        "analysis": "영업이익 증가가 강하지만 매출채권·재고 증가로 이익과 영업현금 사이의 차이가 큽니다. 단순 잉여현금은 영업현금에서 설비·무형자산 취득을 뺀 값이며, 회사 공시 FCF는 원금 지급 59백만 달러를 더 차감한 21,341백만 달러입니다."
+        "analysis": "영업이익 증가가 강하지만 매출채권·재고 증가로 이익과 영업현금 사이의 차이가 큽니다. 단순 잉여현금은 영업현금에서 설비·무형자산 취득을 뺀 값이며, 회사 공시 FCF는 원금 지급 59백만 달러를 더 차감한 21,341백만 달러입니다.",
+        "kind": "company"
       },
       "news": [
         {
@@ -331,9 +364,24 @@
         }
       ],
       "news_note": "최근 7일 회사 발표를 확인했습니다.",
-      "brief": "매출 +106%, 다음 가이던스 이행과 현금 전환 확인"
+      "brief": "매출 +106%, 다음 가이던스 이행과 현금 전환 확인",
+      "status": "verified",
+      "sector_id": "semiconductors",
+      "classification_basis": "공식 사업보고서의 주요 사업을 기준으로 한 자체 분석용 업종 분류. 테마와 별도.",
+      "classification_sources": [
+        "nvda"
+      ],
+      "identity": {
+        "market": "US",
+        "exchange": "XNAS",
+        "code": "NVDA",
+        "product_type": "COMMON"
+      },
+      "identity_sources": [
+        "nvda"
+      ]
     },
-    "TSM": {
+    "US|UNKNOWN|TSM|UNKNOWN": {
       "sector": "반도체",
       "role": "첨단 반도체 제조",
       "title": "AI 수요가 공장 매출과 마진으로 연결되는가",
@@ -414,35 +462,54 @@
             "source": "tsm_fin"
           }
         ],
-        "analysis": "영업이익률은 60.3%로 제조 수익성이 높았습니다. 설비투자 지출도 증가했지만 영업현금이 이를 웃돌았습니다. 다만 매출채권 증가율이 매출 증가율보다 높아 회수 속도를 함께 살펴야 합니다. 월매출은 수요의 보조 지표이며 분기 이익을 확정하지 않습니다."
+        "analysis": "영업이익률은 60.3%로 제조 수익성이 높았습니다. 설비투자 지출도 증가했지만 영업현금이 이를 웃돌았습니다. 다만 매출채권 증가율이 매출 증가율보다 높아 회수 속도를 함께 살펴야 합니다. 월매출은 수요의 보조 지표이며 분기 이익을 확정하지 않습니다.",
+        "kind": "company"
       },
       "news": [],
       "news_note": "최근 7일 범위에서 이 조사에 포함할 새 중요 공시를 확인하지 못했습니다. 최근 확인 수치는 9월 10일 발표한 8월 매출입니다.",
-      "brief": "영업이익률 60.3%, 월매출의 성장 지속성 확인"
+      "brief": "영업이익률 60.3%, 월매출의 성장 지속성 확인",
+      "status": "verified",
+      "sector_id": "semiconductors",
+      "classification_basis": "공식 사업보고서의 주요 사업을 기준으로 한 자체 분석용 업종 분류. 테마와 별도.",
+      "classification_sources": [
+        "tsm"
+      ],
+      "identity": {
+        "market": "US",
+        "exchange": "XNYS",
+        "code": "TSM",
+        "product_type": "ADR"
+      },
+      "identity_sources": [
+        "tsm"
+      ]
     }
   },
   "sectors": {
-    "반도체": {
+    "semiconductors": {
       "outlook": "AI 인프라 지출의 지속성이 관건입니다. 설계와 제조를 나눠 보유해도 최종 고객의 투자 축소는 함께 전해질 수 있습니다.",
       "watch": "NVDA 다음 분기 매출·마진, TSM 월매출·분기 마진",
       "sources": [
         "nvda",
         "tsm"
-      ]
+      ],
+      "label": "반도체"
     },
-    "소프트웨어·클라우드": {
+    "software": {
       "outlook": "기업의 AI 사용이 유료 매출로 전환되는 속도를 봅니다. 높은 설비투자가 현금흐름에 주는 부담도 함께 점검합니다.",
       "watch": "Azure 성장률과 영업현금흐름·설비투자",
       "sources": [
         "msft"
-      ]
+      ],
+      "label": "소프트웨어·클라우드"
     },
-    "인터넷·광고": {
+    "communication": {
       "outlook": "검색의 수익성을 지키면서 클라우드에서 새로운 성장을 만드는지가 관건입니다. AI 전환의 비용과 투자 회수도 확인합니다.",
       "watch": "검색 성장률·영업이익·자유현금흐름",
       "sources": [
         "googl"
-      ]
+      ],
+      "label": "커뮤니케이션 서비스"
     }
   },
   "portfolio": {

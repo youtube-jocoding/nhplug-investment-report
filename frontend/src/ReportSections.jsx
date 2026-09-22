@@ -27,6 +27,7 @@ export function Metrics({ r }) {
   );
 }
 export function Allocation({ r }) {
+  if (!r.research_status.allocation_ready) return <section className="panel allocation"><h2>업종 분류 확인 중</h2><p>검증 완료 {r.research_status.verified}/{r.research_status.total}종목</p><p className="muted">모든 종목의 업종을 확인한 뒤 섹터 비중을 계산합니다. 미확인 업종을 임의로 합산하지 않습니다.</p></section>;
   return (
     <section className="panel allocation">
       <h2>보유 자산의 구성</h2>

@@ -1,9 +1,7 @@
-"""PLUG read-only adapter; official SDK handles credentials, token cache and throttle."""
+"""PLUG read-only adapter; official SDK requests run inside an isolated credential session."""
 import os
 import json
-import secrets
 from datetime import datetime
-from urllib.parse import urlparse
 from .engine import KST, number
 
 BALANCE = '/krstock/inquiry/v1/balance'
@@ -26,6 +24,8 @@ def safe_connection_error(error):
         return 'PLUG 조회 한도를 초과했습니다. 잠시 후 다시 조회하세요.'
     if getattr(error,'category',None)=='network':
         return 'PLUG 서버에 연결하지 못했습니다. 네트워크와 서버 상태를 확인하세요.'
+    if getattr(error,'category',None)=='auth' and getattr(error,'status',None) is None:
+        return '인증 서버의 응답을 확인하지 못했습니다. 네트워크와 PLUG 서버 상태를 확인하세요.'
     if getattr(error,'category',None)=='auth':
         return 'PLUG 인증에 실패했습니다. 로컬 앱키·앱시크릿과 발급 브랜드를 확인하세요.'
     if getattr(error,'status',None)==403:
@@ -82,7 +82,7 @@ def normalize(rows, summary, label, mode, fetched_at):
     for h in rows:
         if not isinstance(h,dict) or not h.get('iem_cd') or not h.get('iem_nm'):
             raise ValueError('보유 종목 식별 정보가 누락되었습니다.')
-        holdings.append({'code':str(h['iem_cd']).strip(),'name':str(h['iem_nm']).strip(),'value':number(h.get('eal_amt'),'평가금액'),'cost':None if h.get('byn_amt') in (None,'') else number(h['byn_amt'],'매수금액'),'pnl':None if h.get('eal_pls_amt') in (None,'') else number(h['eal_pls_amt'],'평가손익',-10**15),'sector':'분류 미확인','sector_source':'잔고 API만으로 업종 확정 불가','kind':str(h.get('pdt_tp_nm') or '미확인')})
+        holdings.append({'code':str(h['iem_cd']).strip().upper(),'name':str(h['iem_nm']).strip(),'value':number(h.get('eal_amt'),'평가금액'),'cost':None if h.get('byn_amt') in (None,'') else number(h['byn_amt'],'매수금액'),'pnl':None if h.get('eal_pls_amt') in (None,'') else number(h['eal_pls_amt'],'평가손익',-10**15),'sector':'분류 미확인','sector_source':'잔고 API만으로 업종 확정 불가','kind':str(h.get('pdt_tp_nm') or '미확인')})
     actual = sum(h['value'] for h in holdings)
     expected = number(summary.get('tot_eal_amt'),'총평가금액')
     if abs(actual-expected)>max(1,len(holdings)):
@@ -95,89 +95,98 @@ def normalize(rows, summary, label, mode, fetched_at):
 
 
 class PlugReader:
-    def __init__(self, credential_path=None):
-        self.credential_path = credential_path
+    def __init__(self, credential_path=None, candidate=None):
+        from .credentials import Vault
+        self.vault = Vault(credential_path)
+        self.candidate = dict(candidate) if candidate else None
+        self.candidate_token = {}
         self.accounts = {}
-        self._call = None
+        self.brand = None
 
-    def setup(self):
-        if self._call:
-            return
-        from nhplug import call  # official SDK loads local .env without printing values
-        from .credentials import load_saved, CREDENTIAL_PATH
-        if self.credential_path is not False:
-            saved=load_saved(self.credential_path or CREDENTIAL_PATH)
-            if saved:os.environ.update(saved)
-        for var in ('NHPLUG_BASE_URL','NHPLUG_AUTH_URL'):
-            val = os.environ.get(var,'https://api.nhplug.com:8443')
-            u = urlparse(val)
-            if u.scheme != 'https' or u.hostname not in {'api.nhplug.com','moapi.nhplug.com','api.n2plug.com','moapi.n2plug.com'} or u.port != 8443 or u.path not in ('','/') or u.query or u.fragment or u.username:
-                raise ValueError('공식 PLUG HTTPS 주소만 사용할 수 있습니다.')
-        auth = os.environ.get('NHPLUG_AUTH_URL','https://api.nhplug.com:8443')
-        if urlparse(auth).hostname.startswith('moapi'):
-            raise ValueError('인증은 운영 도메인을 사용해야 합니다.')
-        self.auth_url = auth
-        self._call = call
+    def forget(self):
+        if self.candidate: self.candidate.clear()
+        self.candidate = None
+        self.candidate_token.clear()
+        self.accounts.clear()
 
-    def fetch(self,path,payload,**kwargs):
+    def fetch(self, path, payload, base_url=None, **kwargs):
         if path not in ALLOWED:
             raise ValueError('이 앱은 계좌 목록과 잔고 조회만 허용합니다.')
-        self.setup()
-        try:
-            return self._call(path,payload,**kwargs)
-        except Exception as error:
-            raise ValueError(safe_connection_error(error)) from None
+        from .sdk_session import session
+        def invoke(credentials, token):
+            self.brand = credentials['brand']
+            try:
+                with session(credentials, token, base_url) as call:
+                    return call(path, payload, **kwargs)
+            except Exception as error:
+                raise ValueError(safe_connection_error(error)) from None
+        if self.candidate:
+            return invoke(self.candidate, self.candidate_token)
+        if not self.vault.path.exists():
+            raise ValueError('저장된 API 키가 없습니다. PLUG 연결 화면에서 브랜드와 키를 입력하세요. .env는 사용하지 않습니다.')
+        with self.vault.transaction() as stored:
+            if not stored.get('credentials'):
+                raise ValueError('저장된 API 키가 없습니다. PLUG 연결 화면에서 키를 입력하세요.')
+            return invoke(stored['credentials'], stored.setdefault('token', {}))
 
     def list_accounts(self):
-        self.setup()
-        before=os.environ.get('NHPLUG_BASE_URL')
-        os.environ['NHPLUG_BASE_URL']=self.auth_url
-        try:
-            data,meta=self.fetch(ACCOUNTS,{},want_meta=True)
-        finally:
-            if before is None: os.environ.pop('NHPLUG_BASE_URL',None)
-            else: os.environ['NHPLUG_BASE_URL']=before
+        data, meta = self.fetch(ACCOUNTS, {}, want_meta=True)
         check_business(data)
-        if meta.has_next or (meta.cts_flag or '').upper()=='Y':
+        if meta.has_next or (meta.cts_flag or '').upper() == 'Y':
             raise ValueError('계좌 목록 연속조회가 필요합니다. 일부 목록에서 자동 선택하지 않습니다.')
-        rows=data.get('Output_0')
-        if not isinstance(rows,list) or not rows:
+        rows = data.get('Output_0')
+        if not isinstance(rows, list) or not rows:
             raise ValueError('조회 가능한 계좌 목록이 없습니다. API 신청 상태를 확인하세요.')
-        self.accounts={}
-        result=[]
-        for row in rows:
-            raw=str(row.get('acct_no') or '').strip()
-            kind=str(row.get('acct_type') or '').strip()
-            if not raw or kind not in ('01','02','03'): continue
-            ref=secrets.token_urlsafe(18)
-            label=('모의' if kind=='03' else '운영')+' 계좌 · ****'+raw[-4:]
-            self.accounts[ref]={'raw':raw,'kind':kind,'label':label}
-            result.append({'ref':ref,'label':label})
+        self.accounts = {}
+        result = []
+        # Sorting full identifiers makes duplicate masked labels deterministic.
+        for row in sorted(rows, key=lambda r: (str(r.get('acct_type', '')), str(r.get('acct_no', '')))):
+            raw = str(row.get('acct_no') or '').strip()
+            kind = str(row.get('acct_type') or '').strip()
+            if not raw or kind not in ('01', '02', '03'): continue
+            stable_id = self.vault.account_id(self.brand, kind, raw)
+            if stable_id in self.accounts: continue
+            label = ('모의' if kind == '03' else '운영') + ' 계좌 · ****' + raw[-4:]
+            self.accounts[stable_id] = {'raw': raw, 'kind': kind, 'label': label}
+            result.append({'ref': stable_id, 'label': label})
+        for item in result:
+            duplicates = [a for a in result if a['label'] == item['label']]
+            if len(duplicates) > 1:
+                for i, a in enumerate(duplicates, 1):
+                    a['label'] += f' · 계좌 {i}'
+                    self.accounts[a['ref']]['label'] = a['label']
+        if not result: raise ValueError('지원하는 계좌가 없습니다. 계좌 종류와 API 이용 권한을 확인하세요.')
         return result
 
-    def balance(self,ref,market='kr'):
-        if market not in ('kr','us'):
+    def balance(self, ref, market='kr'):
+        if market not in ('kr', 'us'):
             raise ValueError('지원하는 조회 시장은 국내 또는 미국입니다.')
         if ref not in self.accounts:
             raise ValueError('계좌 목록을 조회한 뒤 분석할 계좌를 직접 선택하세요.')
-        account=self.accounts[ref]
-        self.setup()
-        brand='n2plug' if 'n2plug.com' in self.auth_url else 'nhplug'
-        host='moapi' if account['kind']=='03' else 'api'
-        before=os.environ.get('NHPLUG_BASE_URL')
-        os.environ['NHPLUG_BASE_URL']=f'https://{host}.{brand}.com:8443'
-        try:
-            if market=='us':
-                rows,summary=collect_pages(self.fetch,GLOBAL_BALANCE,{'act_no':account['raw'],'qut_iqr_dit_cd':'9','fc_sec_trd_nat_cd':'200','cur_cd':'KRW','xns_dit_cd':'0'})
-            else:
-                rows,summary=collect_pages(self.fetch,BALANCE,{'act_no':account['raw'],'bnc_bse_cd':'5','ltg_aot_dit_cd':'9','aet_bse':'2','qut_dit_cd':'UNT','aly_qut_cd':'2'})
-        finally:
-            if before is None: os.environ.pop('NHPLUG_BASE_URL',None)
-            else: os.environ['NHPLUG_BASE_URL']=before
-        normalizer=normalize_us if market=='us' else normalize
-        result=normalizer(rows,summary,account['label'],'mock' if host=='moapi' else 'live',datetime.now(KST).isoformat())
-        result['market']=market
+        account = self.accounts[ref]
+        brand = 'n2plug' if self.brand == 'n2' else 'nhplug'
+        host = 'moapi' if account['kind'] == '03' else 'api'
+        base = f'https://{host}.{brand}.com:8443'
+        def fetch(path, payload, **kwargs): return self.fetch(path, payload, base_url=base, **kwargs)
+        if market == 'us':
+            rows, summary = collect_pages(fetch, GLOBAL_BALANCE, {'act_no': account['raw'], 'qut_iqr_dit_cd': '9', 'fc_sec_trd_nat_cd': '200', 'cur_cd': 'KRW', 'xns_dit_cd': '0'})
+        else:
+            rows, summary = collect_pages(fetch, BALANCE, {'act_no': account['raw'], 'bnc_bse_cd': '5', 'ltg_aot_dit_cd': '9', 'aet_bse': '2', 'qut_dit_cd': 'UNT', 'aly_qut_cd': '2'})
+        result = (normalize_us if market == 'us' else normalize)(rows, summary, account['label'], 'mock' if host == 'moapi' else 'live', datetime.now(KST).isoformat())
+        result.update(market=market, account_id=ref)
+        from .identity import holding_identity
+        for h in result['holdings']:
+            h.update(holding_identity(h, market))
         return result
+
+
+def select_saved(accounts, saved):
+    # Legacy masked labels are deliberately not silently promoted to identity.
+    if not saved.get('account_id'):
+        raise ValueError('계좌 식별 방식이 갱신되었습니다. PLUG 연결에서 계좌를 한 번 다시 선택하세요.')
+    matches = [a for a in accounts if a['ref'] == saved['account_id']]
+    if len(matches) != 1: raise ValueError('저장한 계좌를 식별하지 못했습니다. 계좌를 다시 선택하세요.')
+    return matches[0]['ref']
 
 
 def normalize_us(rows,summary,label,mode,fetched_at):
@@ -188,7 +197,7 @@ def normalize_us(rows,summary,label,mode,fetched_at):
             raise ValueError('해외 보유 종목 식별 정보가 누락되었습니다.')
         if h.get('cur_cd')!='USD':
             raise ValueError('미국 조회에 다른 통화가 섞여 있어 합산하지 않았습니다.')
-        holdings.append({'code':h['iem_cd'].strip(),'name':h['iem_nm'].strip(),
+        holdings.append({'code':h['iem_cd'].strip().upper(),'name':h['iem_nm'].strip(),
             'value':number(h.get('krw_eal_amt'),'원화평가금액'),
             'cost':optional(h,'krw_abk_amt1','원화장부금액'),
             'pnl':optional(h,'krw_eal_pls_amt','원화평가손익',-10**15),

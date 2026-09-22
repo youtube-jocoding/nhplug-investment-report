@@ -25,7 +25,7 @@ def newsletter(r,detail_url=None,attachment=False):
     prefix='가상 예시 · ' if s['mode']=='demo' else ''
     out=[f'<p class="tag" style="color:#147c65;font-size:12px">PORTFOLIO BRIEF · {e(c["as_of"] or "조사 대기")}</p><h1 style="font-size:27px;margin:12px 0">오늘의 포트폴리오</h1><p class="meta">{prefix}조회 {e(s["fetched_at"][:16].replace("T"," "))} KST · {e(s.get("market","kr").upper())}</p>',f'<p><strong>분석 자산 {won(r["total"])}</strong> &nbsp;·&nbsp; 미실현 손익 {won(r["pnl"])}</p>',f'<div class="verdict" style="background:#edf5f1;padding:18px;border-left:3px solid #147c65"><strong>{e(c["headline"])}</strong><p>{e(c["summary"])}</p></div>','<h2>보유 종목, 한 줄씩</h2><table class="data" role="presentation">']
     for h in c['cards'][:6]:
-        b=h['research'];brief=b.get('brief',b['title']) if b else '공식 자료 조사 필요'
+        b=h['research'];brief=b.get('brief',b['title']) if b else ('미확인 · '+h['unresolved_reason'] if h.get('unresolved_reason') else '공식 자료 조사 필요')
         source=link(c,b['sources'][0],'실적 원문') if b else ''
         out.append(f'<tr><td style="padding:10px 0;border-bottom:1px solid #e1e7eb;vertical-align:top;min-width:70px"><b>{e(h["code"])}</b><small style="display:block;color:#61717c">{h["equity_weight"]:.1f}%</small></td><td style="padding:10px 8px;border-bottom:1px solid #e1e7eb">{e(brief)} <small>{source}</small></td></tr>')
     out.append('</table><p class="meta">비중은 주식 평가액 기준 · 실적 기간은 원문/상세 리포트에 표시</p>')
@@ -48,7 +48,10 @@ def html_report(r):
     for h in c['cards']:
         out.append(f'<article id="{e(h["code"],quote=True)}"><h2>{e(h["code"])} · {e(h["name"])}</h2><p>평가액 {won(h["value"])} · 주식 내 {h["equity_weight"]:.1f}% · 총액의 {h["weight"]:.1f}%</p>')
         b=h['research']
-        if not b:out.append('<p>공식 자료 조사 필요</p></article>');continue
+        if not b:
+            out.append('<p>'+e('조사 완료 · 미확인: '+h['unresolved_reason'] if h.get('unresolved_reason') else '공식 자료 조사 필요')+'</p>')
+            out.extend(link(c,k) for k in h.get('checked_sources',[]))
+            out.append('</article>');continue
         out.append(f'<h3>{e(b["title"])}</h3><p>{e(b["thesis"])}</p>')
         for f in b['facts']:out.append(f'<p><b>{e(f["label"])} {e(f["value"])}</b> · {e(f["context"])}</p>')
         out.append('<p>'+ ' · '.join(link(c,k) for k in b['sources'])+'</p><h3>재무제표 핵심</h3><table class="data"><tr><th>지표 / 기간</th><th>수치</th><th>전년 동기</th></tr>')
@@ -61,7 +64,7 @@ def html_report(r):
         if fin.get('operating_margin') is not None:out.append(f'<p>계산한 영업이익률 {fin["operating_margin"]:.1f}% (영업이익 ÷ 매출)</p>')
         if fin.get('simple_fcf') is not None:out.append(f'<p>단순 잉여현금 {fin["simple_fcf"]:,.0f} {e(fin["fcf_unit"])} · {e(fin["fcf_period"])}<small> 영업현금 − 표의 설비투자. 회사별 공시 FCF와 정의가 다를 수 있습니다.</small></p>')
         out.append(f'<p><b>재무 해석</b> {e(fin.get("analysis","미확인"))}</p><h3>최근 뉴스와 의미</h3>')
-        for n in b['news']:out.append(f'<p>{e(n["date"])} · {link(c,n["source"],n["title"])}<br>{e(n["summary"])}<br>{e(n["impact"])}</p>')
+        for n in b['news']:out.append(f'<p>{"최근 7일" if n.get("recent") else "과거 발표 · 배경 자료"} · {e(n["date"])} · {link(c,n["source"],n["title"])}<br>{e(n["summary"])}<br>{e(n["impact"])}</p>')
         if not b['news']:out.append(f'<p>{e(b.get("news_note","미확인"))}</p>')
         for title,key in [('기본 전망','base'),('기대가 강화되는 조건','up'),('판단을 낮출 조건','down'),('보유 관점의 해석','decision'),('다음 확인 지표','watch')]:out.append(f'<p><b>{title} · Codex 해석</b><br>{e(b[key])}</p>')
         out.append('</article>')
@@ -70,6 +73,8 @@ def html_report(r):
     out.append('<h2>다음 일정</h2>')
     for v in c['events']:out.append(f'<p>{e(v.get("date") or "날짜 미확인")} · {e(v["title"])} · {e(v["status"])}<br>{e(v["watch"])} · {link(c,v["source"])}</p>')
     out.extend(['<h2>출처와 분석 범위</h2>',f'<p>{e(c["valuation"])}</p>',*[f'<p>{link(c,k)} · {e(v["date"])}</p>' for k,v in c['sources'].items()],*[f'<p class="meta">{e(x)}</p>' for x in r['warnings']+r['limitations']],f'<p>{DISCLAIMER}</p>'])
+    if not r['research_status']['allocation_ready']:out.append('<p>업종 분류가 모두 확인되지 않아 섹터 비중은 계산하지 않았습니다.</p>')
+    if s['mode']=='demo':out.insert(0,'<p style="border:2px solid #b98018;padding:12px"><b>가상 예시 · 보유 금액과 손익은 실제 계좌가 아닙니다.</b></p>')
     return shell('포트폴리오 분석 리포트',''.join(out),920)
 
 def markdown(r):

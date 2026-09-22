@@ -39,7 +39,7 @@ export function News({ r }) {
 }
 export function StockResearch({ r }) {
   const c = r.consultation;
-  const [selected, setSelected] = useState(c.cards[0]?.code);
+  const [selected, setSelected] = useState(c.cards[0]?.security_id);
   return (
     <section id="stocks" className="panel stock-research">
       <div className="section-heading">
@@ -49,12 +49,12 @@ export function StockResearch({ r }) {
       <div className="stock-tabs" role="tablist" aria-label="분석할 보유 종목">
         {c.cards.map((h) => (
           <button
-            key={h.code}
-            id={`tab-${h.code}`}
+            key={h.security_id}
+            id={`tab-${h.security_id}`}
             role="tab"
-            aria-selected={selected === h.code}
-            aria-controls={`stock-${h.code}`}
-            onClick={() => setSelected(h.code)}
+            aria-selected={selected === h.security_id}
+            aria-controls={`stock-${h.security_id}`}
+            onClick={() => setSelected(h.security_id)}
           >
             {h.code}
             <small>{h.name}</small>
@@ -65,12 +65,12 @@ export function StockResearch({ r }) {
         const b = h.research;
         return (
           <article
-            key={h.code}
-            id={`stock-${h.code}`}
+            key={h.security_id}
+            id={`stock-${h.security_id}`}
             role="tabpanel"
-            aria-labelledby={`tab-${h.code}`}
-            hidden={selected !== h.code}
-            className={`stock-detail ${selected === h.code ? "selected" : ""}`}
+            aria-labelledby={`tab-${h.security_id}`}
+            hidden={selected !== h.security_id}
+            className={`stock-detail ${selected === h.security_id ? "selected" : ""}`}
           >
             <div className="stock-title">
               <div>
@@ -89,6 +89,7 @@ export function StockResearch({ r }) {
                 <small>주식 내 {pct(h.equity_weight)}</small>
               </div>
             </div>
+            {!b && h.research_state === 'unresolved' && <div className="notice"><b>조사 완료 · 미확인</b><p>{h.unresolved_reason}</p>{h.checked_sources.map(id => <ResearchLink key={id} c={c} id={id} />)}</div>}
             {b && (
               <>
                 <div className="fact-strip">

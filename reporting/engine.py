@@ -18,7 +18,7 @@ def won(value):
     return f'{value:,.0f}원'
 
 def demo_snapshot():
-    return json.loads((ROOT/'examples/portfolio.json').read_text())
+    return json.loads((ROOT/'examples/portfolio.json').read_text(encoding='utf-8'))
 
 def joint_shock(value,stock_pct,fx_pct):
     return value*((1+stock_pct/100)*(1+fx_pct/100)-1)
@@ -26,7 +26,13 @@ def joint_shock(value,stock_pct,fx_pct):
 def analyze(snapshot,research=None):
     from .research_store import load
     from .research import enrich,build_consultation
-    research=research if research is not None else load(snapshot['mode']=='demo')
+    if research is None:
+        try: research=load(snapshot['mode']=='demo')
+        except (ValueError, OSError):
+            research={'version':2,'stocks':{},'sources':{},'sectors':{},'events':[], 'validation_error':'리서치 파일 형식을 확인하세요. 계좌 조회는 정상이며 기업 분석은 대기 중입니다.'}
+    from .identity import coverage, instrument_key
+    progress=coverage(snapshot,research)
+    progress['notice']=research.get('validation_error') or ('이전 리서치 파일은 version 2 형식으로 다시 조사해야 합니다.' if research.get('migration_required') else '')
     s=enrich(deepcopy(snapshot),research)
     cash=number(s['cash'],'예수금',-10**15)
     groups={};securities={}
@@ -40,16 +46,18 @@ def analyze(snapshot,research=None):
         h['weight']=h['value']/total*100
         sector=h.get('sector') or '분류 미확인'
         groups[sector]=groups.get(sector,0)+h['value']
-        bucket=securities.setdefault(h['code'],{'name':h['name'],'value':0})
+        bucket=securities.setdefault(instrument_key(h,s.get('market','kr')),{'name':h['name'],'value':0})
         bucket['value']+=h['value']
     allocation=sorted([{'name':k,'value':v,'weight':v/total*100} for k,v in groups.items()],key=lambda x:-x['value'])
     top_sector=next((g for g in allocation if g['name']!='분류 미확인'),None)
     allocation.append({'name':'현금','value':cash,'weight':cash/total*100})
+    if not progress['allocation_ready']:
+        allocation=[];top_sector=None
     top=max(securities.values(),key=lambda h:h['value'],default={'name':'보유 없음','value':0})
     top['weight']=top['value']/total*100
     pnl=sum(h['pnl'] for h in s['holdings']) if all(h['pnl'] is not None for h in s['holdings']) else None
     cost=sum(h['cost'] for h in s['holdings']) if all(h['cost'] is not None for h in s['holdings']) else None
-    r={'snapshot':s,'total':total,'invested':invested,'pnl':pnl,'cost':cost,'allocation':allocation,'top_sector':top_sector,'top_position':top,'unrealized_return':pnl/cost*100 if cost and pnl is not None else None,'warnings':s.get('warnings',[]),'limitations':['선택한 계좌·시장의 부분 자산이며 부채를 차감한 전체 순자산이 아닙니다.','평가손익은 미실현 손익이며 기간 수익률이 아닙니다. 세금·수수료·배당·실현손익은 미반영입니다.','사업 전망은 조건부 해석입니다. 목표주가·매매 추천·수익 보장을 제공하지 않습니다.']}
+    r={'research_status':progress,'snapshot':s,'total':total,'invested':invested,'pnl':pnl,'cost':cost,'allocation':allocation,'top_sector':top_sector,'top_position':top,'unrealized_return':pnl/cost*100 if cost and pnl is not None else None,'warnings':s.get('warnings',[]),'limitations':['선택한 계좌·시장의 부분 자산이며 부채를 차감한 전체 순자산이 아닙니다.','평가손익은 미실현 손익이며 기간 수익률이 아닙니다. 세금·수수료·배당·실현손익은 미반영입니다.','사업 전망은 조건부 해석입니다. 목표주가·매매 추천·수익 보장을 제공하지 않습니다.']}
     r['consultation']=build_consultation(r,research)
     r['method']='PLUG 잔고 수치 검산 + Codex의 출처 기반 기업 분석. 계좌 조회시각과 리서치 확인일을 구분합니다.'
     return r

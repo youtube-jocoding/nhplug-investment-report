@@ -21,9 +21,11 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [delivery, setDelivery] = useState(null);
+  const [loaded, setLoaded] = useState(false), [cached, setCached] = useState(false);
+  function updateReport(report) { setR(report); setCached(false); setLoaded(true); }
   async function load() {
     try {
-      setR((await api("report")).report);
+      const result = await api("report"); setR(result.report); setCached(result.cached); setLoaded(true);
       setDelivery(await api("delivery"));
       setError("");
     } catch (e) {
@@ -37,7 +39,12 @@ export default function App() {
     return (
       <main>
         <h1>포트폴리오 리포트</h1>
-        <p role="status">{error || "리포트를 불러오는 중입니다…"}</p>
+        <p role="status">{error || (loaded ? '실제 계좌를 연결하면 보유 종목 분석을 시작합니다.' : "리포트를 불러오는 중입니다…")}</p>
+        {loaded && <section className="panel empty-connect"><h2>내 계좌부터 연결하세요.</h2><p>브랜드와 API 키를 검증한 뒤 계좌·시장을 선택합니다.</p>
+          <button className="primary" onClick={() => setModal('connect')}>PLUG 연결 시작</button>
+          <button onClick={async () => {try {updateReport((await api('demo', {})).report);} catch(e) {setError(e.message);}}}>가상 예시 따로 보기</button>
+        </section>}
+        {modal === 'connect' && <Connect onReport={updateReport} onClose={() => setModal('')} />}
         {error && <button onClick={load}>다시 시도</button>}
       </main>
     );
@@ -61,7 +68,7 @@ export default function App() {
                 ? "모의계좌"
                 : "실제 계좌"}
           </span>
-          <button className="mail-button" onClick={() => setModal("mail")}>
+          <button disabled={!r.research_status.final_ready} className="mail-button" onClick={() => setModal("mail")}>
             <MailIcon size={15} /> 뉴스레터 미리보기
           </button>
         </div>
@@ -83,6 +90,9 @@ export default function App() {
             기업 자료 확인 {c.as_of || "조사 대기"} · {r.snapshot.scope}
           </p>
         </div>
+        {r.snapshot.mode === 'demo' && <p className="notice demo-banner">가상 예시 · 표시된 보유 금액과 손익은 실제 계좌가 아닙니다.</p>}
+        {cached && <p className="notice">이전에 저장한 잔고입니다. 현재 잔고는 아래 ‘잔고 새로고침’으로 확인하세요.</p>}
+        {!r.research_status.final_ready && <p className="notice">{r.research_status.notice || '자료 조사 대기'} · 검증 완료 {r.research_status.verified}/{r.research_status.total}종목. 조사가 끝나면 뉴스레터와 최종 리포트를 열 수 있습니다.</p>}
         <Metrics r={r} />
         <div className="primary-grid">
           <section className="coaching">
@@ -116,10 +126,11 @@ export default function App() {
             <p>뉴스레터는 핵심만, 상세 리포트는 재무표와 조건별 전망까지.</p>
           </div>
           <div>
-            <button onClick={() => setModal("mail")}>뉴스레터 보기</button>
+            <button disabled={!r.research_status.final_ready} onClick={() => setModal("mail")}>뉴스레터 보기</button>
             <a
               className="button"
-              href="/api/export/html"
+              href={r.research_status.final_ready ? "/api/export/html" : undefined}
+              aria-disabled={!r.research_status.final_ready}
               target="_blank"
               rel="noreferrer"
             >
@@ -145,7 +156,7 @@ export default function App() {
               onClick={async () => {
                 setBusy(true);
                 try {
-                  setR((await api("refresh", {})).report);
+                  updateReport((await api("refresh", {})).report);
                   setError("");
                 } catch (e) {
                   setError(e.message);
@@ -161,7 +172,7 @@ export default function App() {
           <button onClick={() => setModal("connect")}>
             PLUG 연결 <ArrowUpRight size={15} />
           </button>
-          <a className="button" href="/api/export/md">
+          <a className="button" href={r.research_status.final_ready ? "/api/export/md" : undefined} aria-disabled={!r.research_status.final_ready}>
             <Download size={15} />
             분석 메모
           </a>
@@ -177,7 +188,7 @@ export default function App() {
         )}
       </main>
       {modal === "connect" && (
-        <Connect onReport={setR} onClose={() => setModal("")} />
+        <Connect onReport={updateReport} onClose={() => setModal("")} />
       )}{" "}
       {modal === "mail" && <Mail onClose={() => setModal("")} />}{" "}
       {modal === "guide" && <Guide onClose={() => setModal("")} />}
