@@ -8,6 +8,13 @@ KST=timezone(timedelta(hours=9))
 
 
 def validate(data):
+    try:
+        return _validate(data)
+    except (KeyError, TypeError, AttributeError, OverflowError):
+        raise ValueError('리서치 파일의 객체·배열 형식과 필수 항목을 확인하세요.') from None
+
+
+def _validate(data):
     if not isinstance(data,dict) or data.get('version')!=2:raise ValueError('리서치 version 2 객체가 필요합니다.')
     as_of=date.fromisoformat(data['as_of'])
     if as_of>datetime.now(KST).date():raise ValueError('미래의 조사일은 허용하지 않습니다.')
@@ -18,7 +25,7 @@ def validate(data):
         if date.fromisoformat(s['date'])>as_of:raise ValueError('출처 발표일이 조사일보다 늦습니다.')
         if not s.get('label'):raise ValueError('출처 이름이 필요합니다.')
     def refs(ids):
-        if not ids or any(k not in sources for k in ids):raise ValueError('리서치 출처 ID를 확인하세요.')
+        if not isinstance(ids, list) or not ids or any(not isinstance(k,str) or k not in sources for k in ids):raise ValueError('리서치 출처 ID 배열을 확인하세요.')
     from .identity import identity, SECTORS
     resolved = set()
     for code,b in data.get('stocks',{}).items():
@@ -37,6 +44,7 @@ def validate(data):
         actual = identity(i.get('market'), i.get('exchange'), i.get('code'), i.get('product_type'))
         aparts = actual.split('|')
         if 'UNKNOWN' in aparts: raise ValueError('검증 완료 종목은 거래소·상품 종류까지 확인하세요.')
+        if [i.get(k) for k in ('market','exchange','code','product_type')] != aparts: raise ValueError('확인한 증권 식별자는 공백 없는 대문자로 정규화하세요.')
         refs(b.get('identity_sources'))
         for index in (0, 1, 3):
             if parts[index] != 'UNKNOWN' and parts[index] != aparts[index]: raise ValueError('보유와 조사 종목의 시장·거래소·상품 종류가 다릅니다.')
@@ -54,6 +62,8 @@ def validate(data):
         if fin_kind not in ('company', 'fund'): raise ValueError('기업 또는 펀드 재무 지표 종류를 지정하세요.')
         if (i['product_type'] in ('ETF','ETN','FUND')) != (fin_kind == 'fund'): raise ValueError('ETF·펀드와 일반 기업의 지표를 혼용하지 마세요.')
         if not b.get('financials', {}).get('rows'): raise ValueError('종목별 재무 지표 또는 결측 사유를 작성하세요.')
+        if fin_kind == 'fund' and any(r.get('id') in ('revenue','operating_income','operating_cash_flow','capex') for r in b['financials']['rows']):
+            raise ValueError('ETF·펀드 자체에 일반 기업의 매출·이익·설비투자를 적용하지 마세요.')
         for key in ('sector','role','title','thesis','brief','base','up','down','watch','decision'):
             if not isinstance(b.get(key),str) or not b[key].strip():raise ValueError(f'종목 분석 {key} 누락')
         refs(b.get('sources',[]))

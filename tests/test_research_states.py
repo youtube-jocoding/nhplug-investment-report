@@ -52,7 +52,10 @@ def test_alias_requires_verified_mapping_sources():
 def test_fund_uses_fund_metrics_and_fixed_sector_taxonomy():
     d=load(True);d['stocks'][KEY]['identity']['product_type']='ETF'
     with pytest.raises(ValueError,match='ETF'):validate(d)
-    d['stocks'][KEY]['financials']['kind']='fund';validate(d)
+    d['stocks'][KEY]['financials']['kind']='fund'
+    with pytest.raises(ValueError,match='ETF'):validate(d)
+    d['stocks'][KEY]['financials']['rows']=[{'id':'expense_ratio','label':'보수','unit':'%','period':'확인일','source':'msft','value':None,'missing_reason':'가상 테스트: 자료 미확인'}]
+    validate(d)
     d['stocks'][KEY]['sector_id']='AI-theme'
     with pytest.raises(ValueError,match='섹터'):validate(d)
 
@@ -74,3 +77,17 @@ def test_separate_listing_lots_do_not_merge():
     s['holdings'][0]={**s['holdings'][0],'exchange':'XNAS'}
     s['holdings'][1]={**s['holdings'][1],'exchange':'XNYS'}
     assert len(analyze(s)['consultation']['cards'])==2
+
+
+def test_invalid_research_does_not_prevent_showing_account_balance(monkeypatch):
+    import reporting.research_store as rs
+    def broken(example=False):raise ValueError('미완성 리서치')
+    monkeypatch.setattr(rs,'load',broken)
+    s=demo_snapshot();s['mode']='live';r=analyze(s)
+    assert r['total']==50000000 and not r['research_status']['final_ready']
+    assert r['research_status']['notice']
+
+
+def test_source_references_are_arrays_not_single_strings():
+    d=load(True);d['stocks'][KEY]['sources']='msft'
+    with pytest.raises(ValueError,match='배열'):validate(d)

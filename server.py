@@ -5,10 +5,11 @@ import json
 import mimetypes
 import os
 import secrets
+import socket
 import threading
 import time
 from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as BaseThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 from reporting.engine import analyze, demo_snapshot
@@ -24,6 +25,17 @@ BOOTSTRAP_EXPIRES = time.monotonic() + 600
 LOCK = threading.RLock()
 reader = PlugReader()
 state = {'snapshot': None, 'cached': False}
+
+
+class ThreadingHTTPServer(BaseThreadingHTTPServer):
+    # Windows SO_REUSEADDR permits another process to bind the same live port.
+    # Exclusive binding makes port fallback reliable and prevents a stale UI.
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        if os.name == 'nt':
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def selected_snapshot():
