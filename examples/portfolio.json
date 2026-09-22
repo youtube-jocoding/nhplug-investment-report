@@ -1,0 +1,58 @@
+{
+  "mode": "demo",
+  "market": "us",
+  "as_of": "2026-09-23T08:00:00+09:00",
+  "fetched_at": "2026-09-23T08:00:00+09:00",
+  "account_label": "가상 포트폴리오",
+  "scope": "설명용 미국주식·현금 (모든 보유 수치 가상)",
+  "cash": 10000000,
+  "withdrawable": null,
+  "holdings": [
+    {
+      "code": "MSFT",
+      "name": "Microsoft",
+      "value": 14000000,
+      "cost": 12000000,
+      "pnl": 2000000,
+      "sector": "분류 미확인",
+      "kind": "주식"
+    },
+    {
+      "code": "GOOGL",
+      "name": "Alphabet",
+      "value": 11000000,
+      "cost": 10000000,
+      "pnl": 1000000,
+      "sector": "분류 미확인",
+      "kind": "주식"
+    },
+    {
+      "code": "NVDA",
+      "name": "NVIDIA",
+      "value": 9000000,
+      "cost": 7000000,
+      "pnl": 2000000,
+      "sector": "분류 미확인",
+      "kind": "주식"
+    },
+    {
+      "code": "TSM",
+      "name": "TSMC",
+      "value": 6000000,
+      "cost": 5000000,
+      "pnl": 1000000,
+      "sector": "분류 미확인",
+      "kind": "주식"
+    }
+  ],
+  "warnings": [
+    "종목·수량·평가금액·손익은 가상 데이터입니다. 기업 자료는 표시된 확인일 기준입니다."
+  ],
+  "sources": [
+    {
+      "label": "설명용 합성 포트폴리오",
+      "url": null,
+      "fields": "실제 계좌와 무관한 가상 금액"
+    }
+  ]
+}
