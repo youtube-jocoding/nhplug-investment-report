@@ -55,7 +55,7 @@ def prepare(recipient,revision=None):
     r=analyze(s,data);save_report(r,folder)
     subject=subject_for(today)
     day=datetime.now(KST).date()
-    query=f'in:sent from:me to:me subject:"{subject}" after:{(day-timedelta(days=1)).strftime("%Y/%m/%d")} before:{(day+timedelta(days=1)).strftime("%Y/%m/%d")}'
+    query=f'in:sent from:me to:me subject:"내 투자 브리핑" subject:"{day.month}월 {day.day}일" after:{(day-timedelta(days=1)).strftime("%Y/%m/%d")} before:{(day+timedelta(days=1)).strftime("%Y/%m/%d")}'
     payload={'to':'me','subject':subject,'payload':{'mime_type':'multipart/mixed','parts':[{'mime_type':'text/html','charset':'utf-8','body':{'content':newsletter(r,attachment=True)}},{'mime_type':'text/html','charset':'utf-8','filename':'report.html','content_disposition':'attachment','body':{'content':html_report(r)}}]},'response_fields':['id','thread_id','label_ids']}
     write(folder/'gmail-payload.json',payload)
     digest=hashlib.sha256((folder/'gmail-payload.json').read_bytes()).hexdigest()
