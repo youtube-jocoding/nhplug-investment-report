@@ -4,6 +4,7 @@ from email.message import EmailMessage
 from pathlib import Path
 import json,os
 from .engine import won
+from .storage import protect_directory
 
 DISCLAIMER='개인 확인용 리포트 · 투자 판단을 대신하지 않음 · 특정 종목 추천·수익 보장 아님'
 
@@ -97,7 +98,7 @@ def email_message(r):
     return msg
 
 def save_report(r,directory):
-    directory=Path(directory);directory.mkdir(mode=0o700,parents=True,exist_ok=True)
+    directory=protect_directory(directory)
     artifacts={'report.json':json.dumps(r,ensure_ascii=False,indent=2),'report.md':markdown(r),'report.html':html_report(r),'newsletter.html':newsletter(r,detail_url='report.html'),'report.eml':email_message(r).as_string()}
     for name,content in artifacts.items():
         fd=os.open(directory/name,os.O_CREAT|os.O_TRUNC|os.O_WRONLY,0o600)

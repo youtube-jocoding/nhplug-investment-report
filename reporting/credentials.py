@@ -105,7 +105,11 @@ def save_credentials(data, path=None, token=None):
 def legacy_detected():
     # Existence check only. Never read or import ancestor/global .env files.
     candidates = [p / '.env' for p in (ROOT, *ROOT.parents)] + [Path.home() / '.nhplug/.env']
-    return any(p.is_file() for p in candidates)
+    for path in candidates:
+        try:
+            if path.is_file(): return True
+        except OSError: continue
+    return False
 
 
 def credential_status():

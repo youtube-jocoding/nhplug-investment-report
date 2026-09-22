@@ -112,3 +112,12 @@ def test_same_masked_label_different_stable_accounts_do_not_collide(ready):
 def test_extra_research_holding_cannot_send(ready):
     s,d,_=ready;d['stocks']['US|UNKNOWN|UNOWNED|UNKNOWN']={'status':'pending'}
     with pytest.raises(ValueError):daily.prepare('owner@example.com')
+
+
+def test_upgrade_does_not_resend_an_old_masked_identity_ledger(ready):
+    import hashlib
+    s,_,p=ready
+    today=datetime.now(KST).date().isoformat()
+    old=hashlib.sha256((today+'|owner@example.com|'+s['account_label']+'|'+s.get('market','kr')).encode()).hexdigest()[:20]
+    daily.write(p/'delivery-ledger'/f'{old}.json',{'status':'sent','message_id':'existing-message'})
+    with pytest.raises(ValueError,match='이전 버전'):daily.prepare('owner@example.com')

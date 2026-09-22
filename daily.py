@@ -45,7 +45,8 @@ def prepare(recipient,revision=None):
     today=datetime.now(KST).date().isoformat()
     key=hashlib.sha256((today+'|'+recipient.lower()+'|'+s['account_id']+'|'+s.get('market','kr')+('|revision:'+revision if revision else '')).encode()).hexdigest()[:20]
     ledger=PRIVATE/'delivery-ledger'/f'{key}.json'
-    if ledger.exists():raise ValueError('오늘 발송 시도가 이미 기록되어 있습니다. Gmail에서 확인하고 자동 재발송하지 마세요.')
+    legacy_key=hashlib.sha256((today+'|'+recipient.lower()+'|'+s['account_label']+'|'+s.get('market','kr')+('|revision:'+revision if revision else '')).encode()).hexdigest()[:20]
+    if ledger.exists() or (PRIVATE/'delivery-ledger'/f'{legacy_key}.json').exists():raise ValueError('오늘 발송 시도가 이미 기록되어 있습니다. 이전 버전 기록도 포함해 Gmail에서 확인하고 자동 재발송하지 마세요.')
     run=today+'-'+uuid.uuid4().hex[:8];folder=PRIVATE/'reports'/run
     r=analyze(s,data);save_report(r,folder)
     subject=subject_for(today)
