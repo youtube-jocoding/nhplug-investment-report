@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from reporting.engine import analyze, demo_snapshot
 from reporting.provider import PlugReader, select_saved
-from reporting.credentials import credential_environment, save_credentials, credential_status
+from reporting.connection import save_verified_connection, migrate_legacy, ensure_credentials, connection_status, record_connected, ConnectionProblem
 from reporting.export import html_report, markdown, email_message, newsletter
 from reporting.storage import read_json, write_json
 from reporting.paths import ROOT, PRIVATE
@@ -39,6 +39,7 @@ class ThreadingHTTPServer(BaseThreadingHTTPServer):
 
 
 def selected_snapshot():
+    ensure_credentials(PRIVATE)
     path = PRIVATE / 'selected-account.json'
     if not path.exists(): raise ValueError('계좌를 먼저 연결하세요.')
     saved = read_json(path)
@@ -55,27 +56,17 @@ def current_report(final=False):
 
 def connect_credentials(data):
     global reader
-    credential_environment(data)
-    candidate = PlugReader(candidate=data)
     try:
-        accounts = candidate.list_accounts()  # Fresh token, ignoring every old SDK cache.
-        save_credentials(data, token=candidate.candidate_token)
-        replacement = PlugReader()
-        replacement.accounts = dict(candidate.accounts)
-        replacement.brand = candidate.brand
+        result = save_verified_connection(data, PRIVATE)
         reader.forget()
-        reader = replacement
-        # Remove only this app's deprecated file, never an ancestor/global .env.
-        legacy = PRIVATE / 'plug-credentials.json'
-        if legacy.exists(): legacy.unlink()
-        state.update(snapshot=None, cached=False)
-        for name in ('selected-account.json', 'last-snapshot.json'):
-            (PRIVATE / name).unlink(missing_ok=True)
-        return {'accounts': accounts, 'saved': True, 'connection': credential_status()}
+        reader = PlugReader(PRIVATE / 'plug-vault.json')
+        state['cached'] = bool(state['snapshot'])
+        return {**result, 'connection': connection_status(PRIVATE)}
+    except ConnectionProblem:
+        raise
     except ValueError as ex:
-        raise ValueError('검증 실패 · 새 키를 저장하지 않았습니다. ' + str(ex)) from None
+        raise ValueError('검증 실패 · 새 키를 저장하지 않았습니다. 기존 연결을 유지했습니다. ' + str(ex)) from None
     finally:
-        candidate.forget()
         data.clear()
 
 
@@ -113,12 +104,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond({'error': '서버 시작 시 표시한 접속 링크로 화면을 여세요.'}, 401)
         with LOCK:
             try:
-                if path == '/api/connection': return self.respond(credential_status())
+                if path == '/api/connection': return self.respond(connection_status(PRIVATE))
                 if path == '/api/delivery':
                     f = PRIVATE / 'delivery.json'
                     return self.respond(read_json(f) if f.exists() else {'status': '미발송', 'gmail_url': None})
                 if path == '/api/report':
-                    return self.respond({'report': current_report() if state['snapshot'] else None, 'cached': state['cached'], 'connection': credential_status()})
+                    return self.respond({'report': current_report() if state['snapshot'] else None, 'cached': state['cached'], 'connection': connection_status(PRIVATE)})
                 if path == '/api/mail-preview': return self.respond(newsletter(current_report(True), detail_url='/api/export/html'), ctype='text/html; charset=utf-8')
                 if path == '/api/export/eml': return self.respond(email_message(current_report(True)).as_bytes(), ctype='message/rfc822', filename='investment-report.eml')
                 if path == '/api/export/md': return self.respond(markdown(current_report(True)), ctype='text/markdown; charset=utf-8', filename='investment-report.md')
@@ -162,22 +153,29 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({'ok': True}, cookie=True)
                 if self.path == '/api/credentials': return self.respond(connect_credentials(data))
                 if self.path == '/api/migrate':
-                    legacy = PRIVATE / 'plug-credentials.json'
-                    if not legacy.exists(): raise ValueError('이 앱의 이전 키 파일이 없습니다. 키를 직접 입력하세요.')
-                    return self.respond(connect_credentials(read_json(legacy)))
-                if self.path == '/api/accounts': return self.respond({'accounts': reader.list_accounts()})
+                    result = migrate_legacy(PRIVATE, retry=True)
+                    reader.forget()
+                    return self.respond({**result, 'connection': connection_status(PRIVATE)})
+                if self.path == '/api/accounts':
+                    ensure_credentials(PRIVATE)
+                    return self.respond({'accounts': reader.list_accounts()})
                 if self.path == '/api/demo':
                     snap = demo_snapshot()
                 elif self.path == '/api/connect':
                     market = data.get('market', 'us')
+                    if data.get('ref') not in reader.accounts: reader.list_accounts()
                     snap = reader.balance(data.get('ref'), market)
                     write_json(PRIVATE / 'selected-account.json', {'account_id': snap['account_id'], 'label': snap['account_label'], 'market': market})
                 elif self.path == '/api/refresh': snap = selected_snapshot()
                 else: return self.respond({'error': '없는 기능입니다.'}, 404)
                 report = analyze(snap)
                 state.update(snapshot=snap, cached=False)
-                if snap['mode'] != 'demo': write_json(PRIVATE / 'last-snapshot.json', snap)
+                if snap['mode'] != 'demo':
+                    write_json(PRIVATE / 'last-snapshot.json', snap)
+                    record_connected(PRIVATE)
                 return self.respond({'report': report, 'cached': False})
+        except ConnectionProblem as ex:
+            self.respond({'error': str(ex), 'code': ex.code}, 400)
         except (ValueError, TypeError, KeyError) as ex:
             self.respond({'error': str(ex) if type(ex) is ValueError else '입력 형식·필수 항목을 확인하세요.'}, 400)
         except Exception:

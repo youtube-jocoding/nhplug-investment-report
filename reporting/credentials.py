@@ -113,12 +113,5 @@ def legacy_detected():
 
 
 def credential_status():
-    try:
-        public = read_json(CREDENTIAL_PATH) if CREDENTIAL_PATH.exists() else {}
-        configured = public.get('configured', False)
-        info = public.get('metadata', {}) if configured else {}
-    except (OSError, ValueError, TypeError, AttributeError):
-        configured = False; info = {}
-    return {'source': 'secure_store' if configured else 'none',
-            'legacy_env_ignored': legacy_detected(), 'legacy_local_file': (PRIVATE / 'plug-credentials.json').is_file(),
-            'metadata': info}
+    from .connection import connection_status
+    return connection_status(PRIVATE)

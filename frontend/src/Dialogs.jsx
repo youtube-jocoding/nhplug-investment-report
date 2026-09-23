@@ -23,6 +23,7 @@ export function Connect({ onReport, onClose }) {
       await f();
     } catch (e) {
       setError(e.message);
+      api("connection").then(setConnection).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -32,14 +33,14 @@ export function Connect({ onReport, onClose }) {
       <p>
         공식 API에서 계좌 목록과 선택한 시장의 잔고를 조회합니다. 웹에서 검증한 키를 이 PC의 보안 저장소로 보호하며, 계좌는 마스킹해 표시합니다.
       </p>
-      <p className="notice">{connection?.source === 'secure_store' ? '키 출처: OS 보안 저장소로 보호한 연결 키' : '연결된 키 없음 · 아래에서 브랜드와 키를 입력하세요.'}
+      <p className="notice">{connection?.message || '저장된 연결 상태를 확인하고 있습니다…'}
         {connection?.legacy_env_ignored && <><br />이전 .env 파일 감지 · 이 앱에서는 읽지 않습니다.</>}
       </p>
       {connection?.legacy_local_file && <button disabled={busy} onClick={() => run(async () => {
-        const x = await api('migrate', {}); setConnection(x.connection); setAccounts(x.accounts); setSaved(true);
+        const x = await api('migrate', {}); setConnection(x.connection); setAccounts(x.accounts || []); setSelected(x.selected_ref || ''); if (x.market) setMarket(x.market); setSaved(true);
       })}>이 앱의 이전 저장 키 검증 후 암호화 이전</button>}
       <button
-        disabled={busy || connection?.source !== 'secure_store'}
+        disabled={busy || !connection || connection.source === 'none'}
         onClick={() =>
           run(async () => {
             const x = await api("accounts", {});
@@ -111,7 +112,7 @@ export function Connect({ onReport, onClose }) {
               setSaved(false);
               try {
                 const x = await api("credentials", values);
-                setAccounts(x.accounts); setConnection(x.connection); setSaved(true);
+                setAccounts(x.accounts); setConnection(x.connection); setSelected(x.selected_ref || ''); if (x.market) setMarket(x.market); setSaved(true);
               } finally { values.app_key = ''; values.app_secret = ''; }
             });
           }}
@@ -180,8 +181,7 @@ export function Connect({ onReport, onClose }) {
       </details>
       {saved && (
         <p role="status">
-          API 연결을 확인하고 암호화해 저장했습니다. 위 목록에서 분석할 계좌를
-          선택하세요.
+          {connection?.message || '키 검증과 저장이 완료됐습니다. 위 목록에서 계좌를 선택하세요.'}
         </p>
       )}
       <p className="muted">

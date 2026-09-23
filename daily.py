@@ -12,20 +12,23 @@ from reporting.research_store import load
 from reporting.provider import PlugReader, select_saved
 from reporting.storage import write_json, file_lock
 from reporting.identity import require_complete
+from reporting.connection import ensure_credentials, migrate_legacy, connection_status, record_connected, ConnectionProblem
 from reporting.export import save_report,newsletter,html_report,subject_for
 
 write = write_json
 
 def collect():
+    ensure_credentials(PRIVATE)
     selected=PRIVATE/'selected-account.json'
     if not selected.exists():raise ValueError('로컬 화면에서 PLUG 키와 계좌를 연결하세요.')
-    settings=json.loads(selected.read_text(encoding='utf-8'));reader=PlugReader()
+    settings=json.loads(selected.read_text(encoding='utf-8'));reader=PlugReader(PRIVATE/'plug-vault.json')
     ref=select_saved(reader.list_accounts(),settings)
     snap=reader.balance(ref,settings.get('market','us'))
     if snap['mode']!='live':raise ValueError('정기 발송에는 실제 계좌가 필요합니다.')
     write(PRIVATE/'last-snapshot.json',snap)
     brief={'fetched_at':snap['fetched_at'],'market':snap.get('market','kr'),'holdings':[{k:h.get(k) for k in ('security_id','market','exchange','code','product_type','name')} for h in snap['holdings']],'instructions':'WORKFLOW.md에 따라 현재 날짜의 공식 실적·공시·최근 뉴스를 조사하고 private/research.json 작성. 기존 파일의 날짜만 바꾸지 않음.'}
     write(PRIVATE/'research-brief.json',brief)
+    record_connected(PRIVATE)
     return {'status':'collected','brief':str(PRIVATE/'research-brief.json'),'holdings':len(snap['holdings'])}
 
 def check_fresh(s,data,now=None):
@@ -107,6 +110,7 @@ def sent(run,message_id):
 def main():
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('collect');sub.add_parser('demo');sub.add_parser('render')
+    sub.add_parser('doctor');sub.add_parser('migrate')
     x=sub.add_parser('prepare');x.add_argument('--recipient',required=True);x.add_argument('--revision',help='사용자가 명시적으로 요청한 수정본 발송에만 사용. 정기 실행에서 사용 금지.')
     x=sub.add_parser('claim');x.add_argument('run')
     x=sub.add_parser('sent');x.add_argument('run');x.add_argument('--message-id',required=True)
@@ -114,7 +118,9 @@ def main():
     for name in ('uncertain','failed-before-send'):
         x=sub.add_parser(name);x.add_argument('run')
     a=p.parse_args()
-    if a.command=='collect':result=collect()
+    if a.command=='doctor':result=connection_status(PRIVATE)
+    elif a.command=='migrate':result=migrate_legacy(PRIVATE,retry=True)
+    elif a.command=='collect':result=collect()
     elif a.command=='prepare':result=prepare(a.recipient,a.revision)
     elif a.command=='claim':result=claim(a.run)
     elif a.command=='sent':result=sent(a.run,a.message_id)
@@ -127,5 +133,7 @@ def main():
 
 if __name__=='__main__':
     try:main()
+    except ConnectionProblem as ex:
+        print(json.dumps({'error':str(ex),'code':ex.code},ensure_ascii=False));raise SystemExit(1)
     except Exception as ex:
         print(json.dumps({'error':str(ex) if isinstance(ex,ValueError) else '설정·파일·연결 상태를 확인하세요. 원문 오류는 민감정보 보호를 위해 숨겼습니다.'},ensure_ascii=False));raise SystemExit(1)
