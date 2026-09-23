@@ -2,10 +2,13 @@
 from copy import deepcopy
 from datetime import datetime,date
 from .engine import KST,joint_shock
+from .identity import research_for, instrument_key, holding_identity
 
 def enrich(s,data):
     for h in s['holdings']:
-        b=data.get('stocks',{}).get(h['code'])
+        h.update(holding_identity(h,s.get('market','kr')))
+        b=research_for(h,data,s.get('market','kr'))
+        h['sector']='분류 미확인'
         if b:h.update(sector=b['sector'],sector_source='공식 사업 자료에 근거한 분석용 분류 · GICS 아님')
     return s
 
@@ -29,15 +32,18 @@ def build_consultation(r,data):
     today=datetime.now(KST).date();asof=data.get('as_of')
     groups={}
     for h in r['snapshot']['holdings']:
-        g=groups.setdefault(h['code'],{**h,'value':0,'pnl':0,'cost':0})
+        g=groups.setdefault(instrument_key(h,r['snapshot'].get('market','kr')),{**h,'value':0,'pnl':0,'cost':0})
         g['value']+=h['value']
         for k in ('pnl','cost'):g[k]=None if g[k] is None or h.get(k) is None else g[k]+h[k]
     cards=[]
     for h in sorted(groups.values(),key=lambda x:-x['value']):
-        b=deepcopy(data.get('stocks',{}).get(h['code']))
-        if b:b['financials']=financials(b)
-        cards.append({**h,'weight':h['value']/r['total']*100,'equity_weight':h['value']/r['invested']*100 if r['invested'] else 0,'research':b})
-    portfolio=data.get('portfolio',{}) if set(data.get('stocks',{}))==set(groups) else {}
+        b=deepcopy(research_for(h,data,r['snapshot'].get('market','kr')))
+        if b:
+            b['financials']=financials(b)
+            for n in b['news']:n['recent']=0<=(today-date.fromisoformat(n['date'])).days<=7
+        entry=data.get('stocks',{}).get(instrument_key(h,r['snapshot'].get('market','kr')), {})
+        cards.append({**h,'research_state':entry.get('status','pending'),'unresolved_reason':entry.get('reason'),'checked_sources':entry.get('sources',[]) if entry.get('status')=='unresolved' else [],'weight':h['value']/r['total']*100,'equity_weight':h['value']/r['invested']*100 if r['invested'] else 0,'research':b})
+    portfolio=data.get('portfolio',{}) if r['research_status']['final_ready'] else {}
     theme=sum(h['value'] for h in cards if h['code'] in portfolio.get('theme_codes',[]))
     news=[];seen=set()
     for h in cards:
@@ -45,6 +51,7 @@ def build_consultation(r,data):
             key=(n['source'],n['title'])
             if key in seen:continue
             seen.add(key);news.append({**n,'code':h['code'],'recent':0<=(today-date.fromisoformat(n['date'])).days<=7})
-    events=[{**v,'status':'예정 · 변경 가능' if v.get('date') and v['date']>=today.isoformat() else '발표일 재확인 필요'} for v in data.get('events',[]) if not v.get('codes') or any(c in groups for c in v['codes'])]
-    sectors=[{**g,**data['sectors'][g['name']],'equity_weight':g['value']/r['invested']*100 if r['invested'] else 0} for g in r['allocation'] if g['name'] in data.get('sectors',{})]
+    events=[{**v,'status':'예정 · 변경 가능' if v.get('date') and v['date']>=today.isoformat() else '발표일 재확인 필요'} for v in data.get('events',[]) if not v.get('codes') or any(c in {h['code'] for h in cards} for c in v['codes'])]
+    bylabel={v['label']:v for v in data.get('sectors',{}).values()}
+    sectors=[{**g,**bylabel[g['name']],'equity_weight':g['value']/r['invested']*100 if r['invested'] else 0} for g in r['allocation'] if g['name'] in bylabel]
     return {'as_of':asof,'stale':not asof or asof!=today.isoformat(),'headline':portfolio.get('headline','공식 자료를 연결하면 기업 분석을 시작합니다.'),'summary':portfolio.get('summary','Codex가 보유 종목의 최신 공시와 뉴스를 조사한 뒤 이 화면에 반영합니다.'),'cards':cards,'coverage':sum(bool(c['research']) for c in cards),'count':len(cards),'sectors':sectors,'events':events,'news':sorted(news,key=lambda n:n['date'],reverse=True),'sources':data.get('sources',{}),'theme_label':portfolio.get('theme_label'),'theme_equity_weight':theme/r['invested']*100 if r['invested'] else 0,'theme_note':'사업상 공통 노출에 대한 정성 분류이며 매출 비중이나 상관계수가 아닙니다.','valuation':'실시간 가치평가 배수와 컨센서스를 연결하지 않은 경우 적정주가를 산출하지 않습니다. 성장 전망과 현재 가격의 매력은 별도로 판단해야 합니다.','scenarios':{f'{s}:{fx}':{'change':joint_shock(r['invested'],s,fx),'weight':joint_shock(r['invested'],s,fx)/r['total']*100,'after':r['invested']+joint_shock(r['invested'],s,fx)} for s in range(-40,31,5) for fx in range(-20,21,5)}}

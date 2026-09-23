@@ -25,15 +25,17 @@ function filmingEntries(entries) {
   if (!entries.length) return [];
   const byDate = Object.fromEntries(entries.map((entry) => [entry.date, entry]));
   const latest = entries[0];
-  return ["2026-09-25", "2026-09-24", "2026-09-23"].map((date) => {
-    if (byDate[date]) return { ...byDate[date], preview: false };
-    return {
+  const realEntries = entries.map((entry) => ({ ...entry, preview: false }));
+  const filmingWindow = latest.date <= "2026-09-25" && byDate["2026-09-23"];
+  const previews = filmingWindow ? ["2026-09-25", "2026-09-24"]
+    .filter((date) => !byDate[date])
+    .map((date) => ({
       ...latest,
       date,
       headline: previewHeadlines[date] || latest.headline,
       preview: true,
-    };
-  });
+    })) : [];
+  return [...realEntries, ...previews].sort((a, b) => b.date.localeCompare(a.date));
 }
 
 function DateRail({ entries, selected, onSelect }) {
@@ -94,7 +96,7 @@ function Report({ entry }) {
 
       <section className="archive-news">
         <h2>주요 뉴스</h2>
-        <div className="news-grid">
+        <div className="archive-news-grid">
           {entry.news.slice(0, 2).map((item, index) => (
             <article key={`${item.code}-${item.title}`}>
               <span>0{index + 1}</span>
@@ -122,7 +124,7 @@ function Report({ entry }) {
               ))}
             </nav>
           </div>
-          <div className="stock-detail">
+          <div className="archive-stock-detail">
             <div className="stock-story">
               <h3>{selectedStock.code}</h3>
               <h4>{selectedStock.title}</h4>
@@ -133,7 +135,7 @@ function Report({ entry }) {
                 <div><dt>위험 조건</dt><dd>{selectedStock.down}</dd></div>
               </dl>
             </div>
-            <div className="financial-table">
+            <div className="archive-financial-table">
               <h3>최근 재무 핵심</h3>
               <table>
                 <thead><tr><th>지표</th><th>기간</th><th>수치</th><th>원문</th></tr></thead>
@@ -184,7 +186,8 @@ export default function ArchiveApp() {
   useEffect(() => {
     api("archive").then((data) => {
       setEntries(data.entries);
-      setSelected(data.entries.length ? "2026-09-25" : "");
+      const latest = data.entries[0]?.date;
+      setSelected(latest && latest <= "2026-09-25" ? "2026-09-25" : latest || "");
     }).catch((reason) => setError(reason.message));
   }, []);
 

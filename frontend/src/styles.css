@@ -1491,3 +1491,5 @@ h3,
     font-size: 16px;
   }
 }
+
+button:disabled,[aria-disabled="true"]{opacity:.45;cursor:not-allowed;pointer-events:none}.empty-connect{max-width:680px;margin:40px 0}.empty-connect button{margin:12px 12px 0 0}.demo-banner{border:2px solid #b98018;background:#fff7df;font-weight:700}

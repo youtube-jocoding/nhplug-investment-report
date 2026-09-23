@@ -15,7 +15,8 @@ def sample(code='NVDA'):
 
 def report(code='NVDA'):
     rows,summary=sample(code)
-    return analyze(normalize_us(rows,summary,'운영 ****0000','live','2026-09-23T00:00:00+09:00'),load(True))
+    data=load(True);data['stocks']={k:v for k,v in data['stocks'].items() if k=='US|UNKNOWN|'+code+'|UNKNOWN'}
+    return analyze(normalize_us(rows,summary,'운영 ****0000','live','2026-09-23T00:00:00+09:00'),data)
 
 
 def test_us_values_remain_krw_and_cash_is_counted_once():

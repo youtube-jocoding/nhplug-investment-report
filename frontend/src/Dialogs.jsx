@@ -4,10 +4,12 @@ import { api } from "./api";
 import { Modal } from "./Modal";
 export function Connect({ onReport, onClose }) {
   const [credentials, setCredentials] = useState({
-    brand: "namuh",
+    brand: "",
     app_key: "",
     app_secret: "",
   });
+  const [connection, setConnection] = useState(null);
+  useEffect(() => { api("connection").then(setConnection).catch(e => setError(e.message)); }, []);
   const [market, setMarket] = useState("us");
   const [saved, setSaved] = useState(false);
   const [accounts, setAccounts] = useState([]),
@@ -21,6 +23,7 @@ export function Connect({ onReport, onClose }) {
       await f();
     } catch (e) {
       setError(e.message);
+      api("connection").then(setConnection).catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -28,11 +31,16 @@ export function Connect({ onReport, onClose }) {
   return (
     <Modal title="PLUG 데이터 연결" onClose={onClose}>
       <p>
-        공식 API에서 계좌 목록과 선택한 시장의 잔고를 조회합니다. 키는 서버의
-        로컬 설정에서 읽고, 계좌는 마스킹해 표시합니다.
+        공식 API에서 계좌 목록과 선택한 시장의 잔고를 조회합니다. 웹에서 검증한 키를 이 PC의 보안 저장소로 보호하며, 계좌는 마스킹해 표시합니다.
       </p>
+      <p className="notice">{connection?.message || '저장된 연결 상태를 확인하고 있습니다…'}
+        {connection?.legacy_env_ignored && <><br />이전 .env 파일 감지 · 이 앱에서는 읽지 않습니다.</>}
+      </p>
+      {connection?.legacy_local_file && <button disabled={busy} onClick={() => run(async () => {
+        const x = await api('migrate', {}); setConnection(x.connection); setAccounts(x.accounts || []); setSelected(x.selected_ref || ''); if (x.market) setMarket(x.market); setSaved(true);
+      })}>이 앱의 이전 저장 키 검증 후 암호화 이전</button>}
       <button
-        disabled={busy}
+        disabled={busy || !connection || connection.source === 'none'}
         onClick={() =>
           run(async () => {
             const x = await api("accounts", {});
@@ -86,36 +94,39 @@ export function Connect({ onReport, onClose }) {
           {error}
         </p>
       )}
-      <details className="credential-editor" open={!!error || undefined}>
-        <summary>현재 키로 다시 연결</summary>
+      <details className="credential-editor" open>
+        <summary>브랜드 선택 후 키 연결</summary>
         <p className="muted">
           키는 이 컴퓨터의 로컬 서버로 전달되어 PLUG 인증에만 사용됩니다. 인증
-          성공 후 현재 사용자만 읽는 파일로 저장합니다. 채팅에 붙여 넣지 마세요.
+          성공 후 OS 보안 저장소로 보호한 암호화 파일에 저장합니다. 실패하면 기존 키는 유지됩니다. 채팅에 붙여 넣지 마세요.
         </p>
         <form
           autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault();
             run(async () => {
-              const values = credentials;
+              const values = { ...credentials };
               setCredentials({ ...credentials, app_key: "", app_secret: "" });
               setAccounts([]);
               setSelected("");
               setSaved(false);
-              const x = await api("credentials", values);
-              setAccounts(x.accounts);
-              setSaved(true);
+              try {
+                const x = await api("credentials", values);
+                setAccounts(x.accounts); setConnection(x.connection); setSelected(x.selected_ref || ''); if (x.market) setMarket(x.market); setSaved(true);
+              } finally { values.app_key = ''; values.app_secret = ''; }
             });
           }}
         >
           <label>
             키 발급 브랜드
             <select
+              required
               value={credentials.brand}
               onChange={(e) =>
                 setCredentials({ ...credentials, brand: e.target.value })
               }
             >
+              <option value="">발급받은 브랜드를 선택하세요</option>
               <option value="namuh">나무 Namuh PLUG</option>
               <option value="n2">N2 PLUG</option>
             </select>
@@ -157,7 +168,7 @@ export function Connect({ onReport, onClose }) {
         <p className="muted">
           <a
             href={
-              credentials.brand === "namuh"
+              credentials.brand !== "n2"
                 ? "https://www.nhplug.com/intro"
                 : "https://www.n2plug.com/intro"
             }
@@ -170,8 +181,7 @@ export function Connect({ onReport, onClose }) {
       </details>
       {saved && (
         <p role="status">
-          API 연결을 확인하고 로컬에 저장했습니다. 위 목록에서 분석할 계좌를
-          선택하세요.
+          {connection?.message || '키 검증과 저장이 완료됐습니다. 위 목록에서 계좌를 선택하세요.'}
         </p>
       )}
       <p className="muted">
