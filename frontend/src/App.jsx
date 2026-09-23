@@ -50,6 +50,7 @@ export default function App() {
             포트폴리오 리포트<span className="brand-dot">.</span>
           </a>
           <nav aria-label="주 메뉴">
+            <a href="/archive">일자별 리포트</a>
             <a href="#stocks">기업 분석</a>
             <a href="#news">최신 뉴스</a>
             <button onClick={() => setModal("guide")}>시작 프롬프트</button>

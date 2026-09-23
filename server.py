@@ -11,6 +11,7 @@ from reporting.engine import analyze, demo_snapshot
 from reporting.provider import PlugReader
 from reporting.credentials import credential_environment, save_credentials
 from reporting.export import html_report, markdown, email_message, save_report, newsletter
+from reporting.archive import load_archive
 
 ROOT=Path(__file__).resolve().parent
 from reporting.paths import PRIVATE
@@ -24,13 +25,13 @@ def save_private(name,data):
     PRIVATE.mkdir(mode=0o700,exist_ok=True)
     path=PRIVATE/name
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-    with os.fdopen(fd,'w') as f: json.dump(data,f,ensure_ascii=False)
+    with os.fdopen(fd,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False)
 
 
 def selected_snapshot():
     path=PRIVATE/'selected-account.json'
     if not path.exists():raise ValueError('계좌를 먼저 연결하세요.')
-    saved=json.loads(path.read_text())
+    saved=json.loads(path.read_text(encoding='utf-8'))
     matches=[a for a in reader.list_accounts() if a['label']==saved['label']]
     if len(matches)!=1:raise ValueError('저장한 계좌 식별이 모호합니다. 계좌를 다시 선택하세요.')
     return reader.balance(matches[0]['ref'],saved.get('market','kr'))
@@ -60,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path=='/api/delivery':
                     f=PRIVATE/'delivery.json'
-                    return self.respond(json.loads(f.read_text()) if f.exists() else {'status':'미발송','gmail_url':None})
+                    return self.respond(json.loads(f.read_text(encoding='utf-8')) if f.exists() else {'status':'미발송','gmail_url':None})
+                if path=='/api/archive': return self.respond({'entries':load_archive()})
                 if path=='/api/report': return self.respond({'report':analyze(state['snapshot']),'token':TOKEN})
                 if path=='/api/mail-preview': return self.respond(newsletter(analyze(state['snapshot']),detail_url='/api/export/html'),ctype='text/html; charset=utf-8')
                 if path=='/api/export/eml': return self.respond(email_message(analyze(state['snapshot'])).as_bytes(),ctype='message/rfc822',filename='investment-note.eml')
@@ -68,7 +70,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path=='/api/export/html': return self.respond(html_report(analyze(state['snapshot'])),ctype='text/html; charset=utf-8')
                 if path in ('/docs/prompts','/docs/filming'):
                     f=ROOT/'docs'/('PROMPTS.md' if path.endswith('prompts') else 'FILMING.md')
-                    return self.respond(f.read_text(),ctype='text/plain; charset=utf-8')
+                    return self.respond(f.read_text(encoding='utf-8'),ctype='text/plain; charset=utf-8')
                 if path.startswith('/api/'): return self.respond({'error':'없는 기능입니다.'},404)
                 dist=(ROOT/'frontend/dist').resolve()
                 f=(dist/path.lstrip('/')).resolve()
@@ -135,7 +137,7 @@ if __name__=='__main__':
     cached=PRIVATE/'last-snapshot.json'
     if cached.exists():
         try:
-            snapshot=json.loads(cached.read_text())
+            snapshot=json.loads(cached.read_text(encoding='utf-8'))
             analyze(snapshot)
             state.update(snapshot=snapshot)
         except (ValueError,KeyError,TypeError):pass

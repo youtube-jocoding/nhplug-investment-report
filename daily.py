@@ -11,6 +11,7 @@ from reporting.engine import KST,analyze,demo_snapshot
 from reporting.research_store import load
 from reporting.provider import PlugReader
 from reporting.export import save_report,newsletter,html_report,subject_for
+from reporting.archive import save_archive
 
 def write(path,data):
     path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -22,7 +23,7 @@ def write(path,data):
 def collect():
     selected=PRIVATE/'selected-account.json'
     if not selected.exists():raise ValueError('로컬 화면에서 PLUG 키와 계좌를 연결하세요.')
-    settings=json.loads(selected.read_text());reader=PlugReader()
+    settings=json.loads(selected.read_text(encoding='utf-8'));reader=PlugReader()
     accounts=[a for a in reader.list_accounts() if a['label']==settings['label']]
     if len(accounts)!=1:raise ValueError('저장한 계좌를 식별하지 못했습니다. 화면에서 다시 선택하세요.')
     snap=reader.balance(accounts[0]['ref'],settings.get('market','us'))
@@ -46,13 +47,13 @@ def check_fresh(s,data,now=None):
 def prepare(recipient,revision=None):
     if revision is not None and not re.fullmatch(r"[a-z0-9-]{1,40}",revision):raise ValueError("수정 발송 식별자를 확인하세요.")
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',recipient):raise ValueError('Gmail 프로필에서 확인한 본인 이메일이 필요합니다.')
-    s=json.loads((PRIVATE/'last-snapshot.json').read_text());data=load();check_fresh(s,data)
+    s=json.loads((PRIVATE/'last-snapshot.json').read_text(encoding='utf-8'));data=load();check_fresh(s,data)
     today=datetime.now(KST).date().isoformat()
     key=hashlib.sha256((today+'|'+recipient.lower()+'|'+s['account_label']+'|'+s.get('market','kr')+('|revision:'+revision if revision else '')).encode()).hexdigest()[:20]
     ledger=PRIVATE/'delivery-ledger'/f'{key}.json'
     if ledger.exists():raise ValueError('오늘 발송 시도가 이미 기록되어 있습니다. Gmail에서 확인하고 자동 재발송하지 마세요.')
     run=today+'-'+uuid.uuid4().hex[:8];folder=PRIVATE/'reports'/run
-    r=analyze(s,data);save_report(r,folder)
+    r=analyze(s,data);save_report(r,folder);save_archive(r)
     subject=subject_for(today)
     day=datetime.now(KST).date()
     query=f'in:sent from:me to:me subject:"내 투자 브리핑" subject:"{day.month}월 {day.day}일" after:{(day-timedelta(days=1)).strftime("%Y/%m/%d")} before:{(day+timedelta(days=1)).strftime("%Y/%m/%d")}'
@@ -65,7 +66,7 @@ def prepare(recipient,revision=None):
 
 def manifest_for(run):
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}-[a-f0-9]{8}',run):raise ValueError('실행 ID 형식이 잘못되었습니다.')
-    folder=PRIVATE/'reports'/run;m=json.loads((folder/'manifest.json').read_text())
+    folder=PRIVATE/'reports'/run;m=json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
     if hashlib.sha256((folder/'gmail-payload.json').read_bytes()).hexdigest()!=m['payload_sha256']:raise ValueError('준비 이후 메일 내용이 바뀌었습니다.')
     return folder,m
 
@@ -81,7 +82,7 @@ def claim(run):
 
 def sent(run,message_id):
     _,m=manifest_for(run);ledger=PRIVATE/'delivery-ledger'/f'{m["key"]}.json'
-    state=json.loads(ledger.read_text())
+    state=json.loads(ledger.read_text(encoding='utf-8'))
     if state['run']!=run or state['status']!='sending':raise ValueError('이 실행의 발송 시도 기록을 확인할 수 없습니다.')
     if not re.fullmatch(r'[A-Za-z0-9_-]{5,256}',message_id):raise ValueError('Gmail 성공 응답의 메시지 ID가 필요합니다.')
     state.update(status='sent',message_id=message_id,sent_at=datetime.now(KST).isoformat())
@@ -101,8 +102,10 @@ def main():
     elif a.command=='claim':result=claim(a.run)
     elif a.command=='sent':result=sent(a.run,a.message_id)
     else:
-        snap=demo_snapshot() if a.command=='demo' else json.loads((PRIVATE/'last-snapshot.json').read_text())
-        folder=PRIVATE/'preview';save_report(analyze(snap),folder);result={'report':str(folder/'report.html'),'newsletter':str(folder/'newsletter.html')}
+        snap=demo_snapshot() if a.command=='demo' else json.loads((PRIVATE/'last-snapshot.json').read_text(encoding='utf-8'))
+        folder=PRIVATE/'preview';report=analyze(snap);save_report(report,folder)
+        if a.command=='render' and report['snapshot']['mode']=='live':save_archive(report)
+        result={'report':str(folder/'report.html'),'newsletter':str(folder/'newsletter.html')}
     print(json.dumps(result,ensure_ascii=False))
 
 if __name__=='__main__':

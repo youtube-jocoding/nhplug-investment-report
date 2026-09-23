@@ -22,7 +22,7 @@ def credential_environment(data):
 def load_saved(path=CREDENTIAL_PATH):
     if not Path(path).is_file(): return None
     try:
-        return credential_environment(json.loads(Path(path).read_text()))
+        return credential_environment(json.loads(Path(path).read_text(encoding='utf-8')))
     except (OSError,ValueError,TypeError):
         raise ValueError('로컬 API 설정 파일을 읽지 못했습니다. 앱에서 다시 연결하세요.') from None
 
@@ -36,7 +36,7 @@ def save_credentials(data,path=CREDENTIAL_PATH):
     try:
         if hasattr(os,"fchmod"):os.fchmod(fd,0o600)
         else:os.chmod(temporary,0o600)
-        with os.fdopen(fd,'w') as f:
+        with os.fdopen(fd,'w',encoding='utf-8') as f:
             json.dump({k:data[k].strip() for k in ('brand','app_key','app_secret')},f)
         os.replace(temporary,path)
     finally:

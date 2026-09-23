@@ -16,8 +16,9 @@ def test_credentials_stored_owner_only_and_original_settings_untouched(tmp_path)
     target=tmp_path/'private'/'plug-credentials.json'
     values=sample()
     assert save_credentials(values,target) is None
-    assert stat.S_IMODE(target.stat().st_mode)==0o600
-    assert stat.S_IMODE(target.parent.stat().st_mode)==0o700
+    if os.name!='nt':
+        assert stat.S_IMODE(target.stat().st_mode)==0o600
+        assert stat.S_IMODE(target.parent.stat().st_mode)==0o700
     loaded=load_saved(target)
     assert loaded['NHPLUG_APP_KEY']==values['app_key']
     assert loaded['NHPLUG_AUTH_URL']=='https://api.nhplug.com:8443'

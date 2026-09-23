@@ -53,5 +53,5 @@ def validate(data):
 def load(example=False):
     path=ROOT/'examples/research.json' if example else PRIVATE/'research.json'
     if not path.exists():return {'version':1,'as_of':None,'stocks':{},'sources':{},'sectors':{},'events':[],'portfolio':{}}
-    try:return validate(json.loads(path.read_text()))
+    try:return validate(json.loads(path.read_text(encoding='utf-8')))
     except (KeyError,TypeError,json.JSONDecodeError) as ex:raise ValueError('리서치 파일의 필수 필드나 JSON 형식을 확인하세요.') from None

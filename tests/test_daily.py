@@ -7,6 +7,7 @@ from reporting.engine import analyze,demo_snapshot,KST
 from reporting.research import financials
 from reporting.research_store import load,validate
 from reporting.export import newsletter,html_report
+from reporting.archive import public_entry,save_archive,load_archive
 
 @pytest.fixture
 def ready(tmp_path,monkeypatch):
@@ -88,3 +89,14 @@ def test_unrelated_holdings_do_not_receive_sample_research():
     r=analyze(s);card=next(c for c in r['consultation']['cards'] if c['code']=='UNRESEARCHED')
     assert card['research'] is None
     assert 'AI 성장' not in r['consultation']['headline']
+
+def test_public_archive_keeps_research_but_removes_account_values(ready,tmp_path):
+    snapshot,data,_=ready
+    report=analyze(snapshot,data)
+    entry=public_entry(report)
+    text=json.dumps(entry,ensure_ascii=False)
+    assert entry['stocks'] and entry['stocks'][0]['financials']
+    assert snapshot['account_label'] not in text
+    assert 'equity_weight' not in text and '평가액' not in text
+    save_archive(report,tmp_path)
+    assert load_archive(tmp_path)[0]['date']==data['as_of']

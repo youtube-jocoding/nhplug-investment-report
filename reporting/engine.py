@@ -18,7 +18,7 @@ def won(value):
     return f'{value:,.0f}원'
 
 def demo_snapshot():
-    return json.loads((ROOT/'examples/portfolio.json').read_text())
+    return json.loads((ROOT/'examples/portfolio.json').read_text(encoding='utf-8'))
 
 def joint_shock(value,stock_pct,fx_pct):
     return value*((1+stock_pct/100)*(1+fx_pct/100)-1)
